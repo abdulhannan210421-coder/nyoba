@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --color-bg: #f3f6f4;
+  --color-surface: #ffffff;
+  --color-fg: #13261c;
+  --color-muted: #5d6f64;
+  --color-line: #d5e2da;
+  --color-primary: #0c6b40;
+  --color-primary-deep: #084e2f;
+  --color-primary-fg: #f4fbf7;
+  --color-primary-muted: #c7ead8;
+  --color-primary-soft: #e7f6ee;
+  --color-sakit: #075985;
+  --color-sakit-fg: #f0f9ff;
+  --color-sakit-bg: #e0f2fe;
+  --color-izin: #9a3412;
+  --color-izin-fg: #fffbeb;
+  --color-izin-bg: #ffedd5;
+  --color-alpha: #9f1239;
+  --color-alpha-fg: #fff1f2;
+  --color-alpha-bg: #ffe4e6;
+  --radius-card: 1.25rem;
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--font-sans);
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}
+
+body.is-dragging,
+body.is-dragging * {
+  user-select: none;
+}
+
+.zone-hot {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

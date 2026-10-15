@@ -1,0 +1,2475 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Taklimda Mobile - Koreksi Absen</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📋</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <script>
+    window.getValPeka = function(obj, targetKeys) {
+        if (!obj || typeof obj !== 'object') return '';
+        const normalizedMap = {};
+        for (let key in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                let cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+                normalizedMap[cleanKey] = obj[key];
+            }
+        }
+        for (let target of targetKeys) {
+            let cleanTarget = target.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (normalizedMap[cleanTarget] !== undefined && normalizedMap[cleanTarget] !== null) {
+                return String(normalizedMap[cleanTarget]).trim();
+            }
+        }
+        return '';
+    };
+
+    // --- HELPER STORAGE INDEXEDDB (KAPASITAS BESAR & CEPAT) ---
+    const IDBHelper = {
+        dbName: 'TaklimdaDB',
+        storeName: 'appCache',
+        db: null,
+        async init() {
+            if (this.db) return this.db;
+            return new Promise((resolve, reject) => {
+                let request = indexedDB.open(this.dbName, 1);
+                request.onupgradeneeded = (e) => {
+                    let db = e.target.result;
+                    if (!db.objectStoreNames.contains(this.storeName)) {
+                        db.createObjectStore(this.storeName);
+                    }
+                };
+                request.onsuccess = (e) => {
+                    this.db = e.target.result;
+                    resolve(this.db);
+                };
+                request.onerror = (e) => resolve(null);
+            });
+        },
+        async set(key, val) {
+            try {
+                let db = await this.init();
+                if (!db) { localStorage.setItem(key, JSON.stringify(val)); return; }
+                let tx = db.transaction(this.storeName, 'readwrite');
+                tx.objectStore(this.storeName).put(val, key);
+            } catch(e) {
+                try { localStorage.setItem(key, JSON.stringify(val)); } catch(ex){}
+            }
+        },
+        async get(key) {
+            try {
+                let db = await this.init();
+                if (!db) {
+                    let ls = localStorage.getItem(key);
+                    return ls ? JSON.parse(ls) : null;
+                }
+                return new Promise((resolve) => {
+                    let tx = db.transaction(this.storeName, 'readonly');
+                    let req = tx.objectStore(this.storeName).get(key);
+                    req.onsuccess = () => resolve(req.result || null);
+                    req.onerror = () => resolve(null);
+                });
+            } catch(e) {
+                let ls = localStorage.getItem(key);
+                return ls ? JSON.parse(ls) : null;
+            }
+        }
+    };
+    </script>
+    
+    <style>
+:root {
+    --primary: #059669;
+    --primary-gradient: linear-gradient(135deg, #059669 0%, #10b981 100%);
+    --bg-color: #f1f5f9;
+    --card-bg: #ffffff;
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    
+    --sakit-color: #0284c7;
+    --sakit-bg: #e0f2fe;
+    --izin-color: #d97706;
+    --izin-bg: #fef3c7;
+    --alpha-color: #e11d48;
+    --alpha-bg: #ffe4e6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
+body { background-color: var(--bg-color); color: var(--text-main); padding: 12px; max-width: 480px; margin: 0 auto; padding-bottom: 24px; }
+
+/* MATIKAN TRANSISI SAAT DRAGGING AGAR SANGAT RINGAN DI HP */
+body.is-dragging *, body.is-dragging {
+    transition: none !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+.view { display: none; }
+.view.active { display: block !important; }
+
+@keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bounceIn {
+    0% { transform: scale(0.3); opacity: 0; }
+    50% { transform: scale(1.05); opacity: 1; }
+    70% { transform: scale(0.95); }
+    100% { transform: scale(1); }
+}
+
+.slide-up { animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+.fade-in { animation: fadeIn 0.2s ease-in; }
+.bounce-in { animation: bounceIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+
+/* DYNAMIC ISLAND */
+.dynamic-island {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-25px) scale(0.6);
+    background: rgba(15, 23, 42, 0.96);
+    color: white;
+    padding: 7px 16px;
+    border-radius: 30px;
+    font-size: 11px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+    z-index: 9999999;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    white-space: nowrap;
+}
+
+.dynamic-island.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+.dynamic-island-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.dynamic-island-dot.online { background: #10b981; box-shadow: 0 0 10px #10b981; }
+.dynamic-island-dot.offline { background: #f43f5e; box-shadow: 0 0 10px #f43f5e; }
+.dynamic-island-dot.sync { background: #f59e0b; box-shadow: 0 0 10px #f59e0b; }
+
+.top-deck { background: white; border-radius: 20px; padding: 14px 16px; border: 1px solid var(--border); box-shadow: 0 4px 20px rgba(0,0,0,0.03); margin-bottom: 12px; }
+.header-compact { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.avatar { background: var(--primary-gradient); color: white; width: 40px; height: 40px; border-radius: 14px; display: flex; justify-content: center; align-items: center; font-size: 17px; font-weight: 800; box-shadow: 0 4px 12px rgba(5,150,105,0.25); }
+
+/* TOMBOL MENU UTAMA HEADER */
+.btn-header-menu {
+    background: #f1f5f9;
+    color: var(--text-main);
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: 0.15s;
+}
+.btn-header-menu:active { transform: scale(0.95); }
+
+/* STYLE POPUP MENU LIST */
+.menu-options-list { display: flex; flex-direction: column; gap: 8px; }
+.menu-opt-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--text-main);
+    cursor: pointer;
+    transition: background 0.15s, transform 0.15s;
+    text-align: left;
+}
+.menu-opt-btn:active { transform: scale(0.98); background: #e2e8f0; }
+.menu-opt-icon { font-size: 18px; width: 24px; text-align: center; }
+
+/* KARTU HASIL PENCARIAN SANTRI */
+.cari-santri-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 10px 12px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+    transition: transform 0.15s, border-color 0.15s;
+    cursor: pointer;
+}
+.cari-santri-card:active {
+    transform: scale(0.98);
+    border-color: var(--primary);
+}
+
+.badge-role {
+    font-size: 8.5px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-weight: 800;
+    display: inline-block;
+}
+.badge-role-mutaallim { background: #e0f2fe; color: #0284c7; border: 1px solid #bae6fd; }
+.badge-role-mualim { background: #f3e8ff; color: #7e22ce; border: 1px solid #e9d5ff; }
+.badge-role-mustamik { background: #fae8ff; color: #86198f; border: 1px solid #f5d0fe; }
+.badge-role-qori { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+
+.progress-inline { display: flex; align-items: center; gap: 10px; background: #f8fafc; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--border); }
+.progress-bar-bg { flex: 1; background: #e2e8f0; height: 8px; border-radius: 10px; overflow: hidden; }
+.progress-bar-fill { background: var(--primary); height: 100%; width: 0%; border-radius: 10px; transition: width 0.4s ease; }
+
+.mode-banner { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; padding: 8px 12px; border-radius: 12px; font-size: 10px; font-weight: 800; margin-top: 10px; text-align: center; }
+.mode-banner.alpha { background: var(--alpha-bg); color: var(--alpha-color); border-color: #fecdd3; }
+.mode-banner.sakit { background: var(--sakit-bg); color: var(--sakit-color); border-color: #bae6fd; }
+.mode-banner.izin { background: var(--izin-bg); color: var(--izin-color); border-color: #fef3c7; }
+
+.controls-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.search-box-mini { width: 100%; position: relative; }
+.search-box-mini input { width: 100%; padding: 10px 14px 10px 36px; border: 1px solid var(--border); border-radius: 14px; outline: none; background: white; font-size: 12px; font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,0.02); transition: border-color 0.2s; }
+.search-box-mini input:focus { border-color: var(--primary); }
+.search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 14px; opacity: 0.5; }
+
+.filter-tabs { display: flex; gap: 6px; width: 100%; }
+.tab-btn { flex: 1; padding: 10px 12px; border: 1px solid var(--border); background: white; border-radius: 12px; font-size: 11px; font-weight: 800; color: var(--text-muted); cursor: pointer; text-align: center; transition: all 0.2s ease; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
+.tab-btn.active { background: var(--text-main); color: white; border-color: var(--text-main); box-shadow: 0 4px 12px rgba(15,23,42,0.15); }
+
+.room-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.room-card { background: white; border-radius: 18px; border: 1px solid var(--border); padding: 14px; cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; transition: transform 0.15s, box-shadow 0.15s; box-shadow: 0 2px 8px rgba(0,0,0,0.02); position: relative; }
+.room-card:active { transform: scale(0.97); }
+.room-card-header { display: flex; justify-content: space-between; align-items: flex-start; }
+.room-card-title { font-size: 13px; font-weight: 800; color: var(--text-main); line-height: 1.2; display: flex; align-items: center; gap: 6px; }
+.room-card-count { background: var(--primary-gradient); color: white; font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 10px; }
+.room-card-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed #e2e8f0; padding-top: 8px; font-size: 10px; color: var(--text-muted); font-weight: 700; }
+
+.room-detail-header { background: white; border-radius: 16px; padding: 12px 14px; border: 1px solid var(--border); margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,0,0,0.02); }
+.btn-back { background: #f1f5f9; color: var(--text-main); border: 1px solid var(--border); padding: 8px 12px; border-radius: 10px; font-size: 11px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: 0.15s; }
+.btn-back:active { transform: scale(0.95); }
+
+.santri-list { display: flex; flex-direction: column; gap: 10px; }
+.santri-card { background: white; border-radius: 16px; padding: 14px; border: 1px solid var(--border); box-shadow: 0 2px 6px rgba(0,0,0,0.015); display: flex; flex-direction: column; gap: 10px; transition: transform 0.15s; }
+.santri-card:active { transform: scale(0.99); }
+
+.card-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.santri-nama { font-size: 13px; font-weight: 800; color: var(--text-main); line-height: 1.2; }
+.santri-meta { font-size: 10px; color: var(--text-muted); font-weight: 600; margin-top: 3px; }
+
+.pills-group { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.pill-tag { padding: 4px 8px; border-radius: 8px; font-size: 10px; font-weight: 800; }
+.pill-sakit { background: var(--sakit-bg); color: var(--sakit-color); }
+.pill-izin { background: var(--izin-bg); color: var(--izin-color); }
+.pill-alpha { background: var(--alpha-bg); color: var(--alpha-color); }
+
+.badge-status { padding: 4px 8px; border-radius: 8px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.3px; }
+.badge-benar { background: #d1fae5; color: #047857; border: 1px solid #a7f3d0; }
+.badge-koreksi { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+.badge-belum { background: #f1f5f9; color: #94a3b8; border: 1px solid var(--border); }
+.badge-unsynced { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; font-size: 8px; padding: 2px 6px; border-radius: 6px; }
+
+.card-actions { display: flex; gap: 6px; padding-top: 6px; border-top: 1px dashed #e2e8f0; }
+.btn-act { flex: 1; padding: 8px 10px; border-radius: 10px; font-size: 11px; font-weight: 800; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: 0.15s; }
+.btn-act:active { transform: scale(0.96); }
+
+.btn-verify { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.btn-edit-card { background: #f8fafc; color: var(--text-main); border: 1px solid var(--border); }
+
+/* MODAL OVERLAY */
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15,23,42,0.75); z-index: 99999; align-items: flex-end; justify-content: center; }
+.modal-overlay.center-modal { align-items: center; padding: 12px; }
+
+#modal-photo-preview, #modal-detail-santri { z-index: 999999 !important; }
+
+.modal-content { background: white; width: 100%; max-width: 480px; border-radius: 24px 24px 0 0; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 -10px 40px rgba(0,0,0,0.2); }
+.modal-overlay.center-modal .modal-content { border-radius: 20px; max-height: 90vh; }
+
+.modal-header { padding: 12px 16px; background: var(--primary-gradient); color: white; display: flex; justify-content: space-between; align-items: center; }
+.modal-body { padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+
+.id-card-box { display: flex; align-items: center; gap: 14px; background: #f8fafc; border: 1px solid var(--border); border-radius: 16px; padding: 12px; }
+.photo-container-id { flex-shrink: 0; width: 68px; height: 85px; position: relative; cursor: pointer; }
+.photo-img-id { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; border: 2px solid var(--primary); background: #ffffff; transition: transform 0.15s; }
+.photo-container-id:active .photo-img-id { transform: scale(0.95); }
+.photo-placeholder-id { width: 100%; height: 100%; border-radius: 12px; border: 2px dashed var(--border); background: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 32px; }
+
+.photo-zoom-badge {
+    position: absolute;
+    bottom: -4px;
+    right: -4px;
+    background: #0f172a;
+    color: white;
+    font-size: 9px;
+    padding: 3px 5px;
+    border-radius: 8px;
+    border: 1.5px solid white;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    pointer-events: none;
+}
+
+.id-card-details { display: flex; flex-direction: column; justify-content: center; gap: 4px; flex: 1; min-width: 0; }
+.id-card-nama { font-size: 14px; font-weight: 800; color: var(--text-main); line-height: 1.25; text-transform: uppercase; word-break: break-word; }
+.id-card-meta { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.meta-val { color: var(--text-main); }
+.meta-val-dom { color: var(--primary); font-weight: 800; }
+
+.section-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; }
+.section-box.drag-over { border: 2px dashed var(--primary) !important; background: #ecfdf5 !important; }
+
+.section-title { font-size: 10px; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
+
+.chips-wrapper { display: flex; flex-wrap: wrap; gap: 6px; min-height: 36px; padding: 6px; border-radius: 10px; background: white; border: 1px dashed var(--border); align-items: center; }
+
+.chip { padding: 6px 10px; border-radius: 8px; font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; cursor: grab; user-select: none; touch-action: none; box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
+.chip:active { cursor: grabbing; transform: scale(1.08); }
+.chip-sakit { background: var(--sakit-bg); color: var(--sakit-color); border: 1px solid #bae6fd; }
+.chip-izin { background: var(--izin-bg); color: var(--izin-color); border: 1px solid #fde68a; }
+.chip-alpha { background: var(--alpha-bg); color: var(--alpha-color); border: 1px solid #fecdd3; }
+
+.trash-zone {
+    display: none;
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) scale(0.95);
+    width: 90%;
+    max-width: 440px;
+    z-index: 9999999;
+    background: #fff1f2;
+    border: 2px dashed #fda4af;
+    border-radius: 16px;
+    padding: 12px 16px;
+    text-align: center;
+    color: #e11d48;
+    font-size: 11px;
+    font-weight: 800;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 10px 30px rgba(225, 29, 72, 0.3);
+}
+
+.trash-zone.show-floating {
+    display: flex !important;
+    animation: slideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.trash-zone.drag-over {
+    background: #ffe4e6 !important;
+    border-color: #e11d48 !important;
+    transform: translateX(-50%) scale(1.03) !important;
+}
+
+.global-quick-card {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.tut-sim-screen-wide { background: #f8fafc; border: 1px solid var(--border); border-radius: 18px; padding: 14px; position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 10px; text-align: left; width: 100%; }
+
+.moving-chip-demo { position: absolute; padding: 5px 10px; border-radius: 10px; font-size: 11px; font-weight: 800; z-index: 10; display: flex; align-items: center; gap: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.hand-pointer-demo { position: absolute; font-size: 28px; z-index: 20; pointer-events: none; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.25)); }
+
+@keyframes realisticDragAndChangeColor {
+    0% { top: 58px; left: 18px; background: var(--alpha-bg); color: var(--alpha-color); border: 1px solid #fecdd3; transform: scale(1); }
+    20% { top: 58px; left: 18px; background: var(--alpha-bg); color: var(--alpha-color); border: 1px solid #fecdd3; transform: scale(1.1); }
+    60% { top: 135px; left: 18px; background: var(--alpha-bg); color: var(--alpha-color); border: 1px solid #fecdd3; transform: scale(1.1); }
+    70% { top: 135px; left: 18px; background: var(--sakit-bg); color: var(--sakit-color); border: 1px solid #bae6fd; transform: scale(1); }
+    90%, 100% { top: 135px; left: 18px; background: var(--sakit-bg); color: var(--sakit-color); border: 1px solid #bae6fd; transform: scale(1); }
+}
+
+@keyframes handFollowDrag {
+    0% { top: 62px; left: 65px; opacity: 0; }
+    15% { top: 62px; left: 65px; opacity: 1; transform: scale(1); }
+    20% { top: 62px; left: 65px; transform: scale(0.85); }
+    60% { top: 140px; left: 65px; transform: scale(0.85); }
+    70% { top: 140px; left: 65px; opacity: 1; transform: scale(1); }
+    85%, 100% { top: 140px; left: 65px; opacity: 0; }
+}
+
+.anim-chip-color { animation: realisticDragAndChangeColor 3.5s infinite ease-in-out; }
+.anim-hand-color { animation: handFollowDrag 3.5s infinite ease-in-out; }
+
+.practice-banner-active { background: #ecfdf5; border: 2px dashed #10b981; color: #047857; padding: 10px; border-radius: 12px; font-size: 11px; font-weight: 800; text-align: center; margin-bottom: 8px; animation: slideUp 0.3s ease; }
+
+#view-login { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #f8fafc; justify-content: center; align-items: center; padding: 16px; z-index: 99999; }
+#view-login.active { display: flex !important; }
+.login-card { background: white; padding: 24px 18px; border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.04); width: 100%; border: 1px solid var(--border); text-align: center; }
+.alphabet-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-bottom: 14px; }
+.alpha-btn { padding: 8px 0; background: #f1f5f9; border: none; border-radius: 8px; font-weight: 800; font-size: 11px; cursor: pointer; color: var(--text-main); transition: 0.15s; }
+.alpha-btn.selected { background: var(--primary); color: white; }
+
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #0f172a; color: white; padding: 10px 20px; border-radius: 25px; font-size: 11px; font-weight: 700; opacity: 0; transition: 0.25s; z-index: 999999; pointer-events: none; box-shadow: 0 8px 20px rgba(0,0,0,0.2); text-align: center; max-width: 90%; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+    </style>
+</head>
+<body>
+
+    <!-- DYNAMIC ISLAND ALA IPHONE ATAS TEMPAT POPUP STATUS -->
+    <div id="dynamic-island" class="dynamic-island">
+        <span id="island-dot" class="dynamic-island-dot online"></span>
+        <span id="island-msg">Terhubung ke Jaringan</span>
+    </div>
+
+    <div id="toast" class="toast">Notifikasi</div>
+
+    <!-- LOGIN MODAL -->
+    <div id="view-login" class="view active">
+        <div class="login-card slide-up">
+            <div style="width: 52px; height: 52px; background: var(--primary-gradient); color: white; font-size: 22px; font-weight: 800; display: flex; align-items: center; justify-content: center; border-radius: 16px; margin: 0 auto 12px; box-shadow: 0 4px 12px rgba(5,150,105,0.25);" id="login-logo">?</div>
+            <h2 style="font-size:17px; font-weight:800; color:var(--text-main);">Koreksi Absen</h2>
+            <p style="color:var(--text-muted); font-size:11px; margin-bottom: 16px;">Pondok Pesantren Sidogiri</p>
+            
+            <p style="font-size:9px; font-weight:800; text-align:left; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase;">Pilih Daerah</p>
+            <div class="alphabet-grid" id="alphabet-grid"></div>
+
+            <div style="text-align:left; margin-bottom:16px;">
+                <label style="font-size:9px; font-weight:800; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Password</label>
+                <input type="password" id="password" placeholder="Masukkan password..." style="width:100%; padding:11px 14px; border:1px solid var(--border); border-radius:12px; font-size:12px; outline:none;" oninput="document.getElementById('login-error').style.display='none'; this.style.borderColor='var(--border)';">
+                <div id="login-error" style="color:#e11d48; font-size:11px; font-weight:800; margin-top:6px; display:none; text-align:left;"></div>
+            </div>
+            
+            <button class="btn-act" style="background:var(--primary-gradient); color:white; width:100%; padding:12px; font-size:12px; border-radius:12px;" onclick="login()">Masuk Sistem ➔</button>
+        </div>
+    </div>
+
+    <!-- VIEW UTAMA -->
+    <div id="view-koreksi" class="view">
+        <div class="top-deck slide-up">
+            <div class="header-compact">
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <div class="avatar" id="nav-avatar">A</div>
+                    <div>
+                        <h3 style="font-size:14px; font-weight:800;">Daerah <span id="koreksi-daerah">A</span></h3>
+                        <p style="font-size:10px; color:var(--text-muted); font-weight:600;" id="stat-progress-text">0 / 0 Santri Selesai</p>
+                    </div>
+                </div>
+                <!-- SINGLE BUTTON MENU FITUR -->
+                <div>
+                    <button class="btn-header-menu" onclick="bukaModalMenu()">☰ Menu</button>
+                </div>
+            </div>
+
+            <div class="progress-inline">
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="progress-bar-fill"></div>
+                </div>
+                <span style="font-size:11px; font-weight:800; color:var(--primary);" id="stat-percent">0%</span>
+            </div>
+
+            <div id="mode-banner-el" class="mode-banner" style="display:none;">
+                📢 Mode Fokus Koreksi: SEMUA DATA
+            </div>
+
+            <div id="pending-info-bar" style="display:none; font-size:10px; font-weight:800; color:#d97706; background:#fef3c7; border:1px solid #fcd34d; padding:6px 10px; border-radius:10px; margin-top:8px; text-align:center;">
+                ⚠️ Ada <span id="pending-count-num">0</span> data tersimpan offline. Akan otomatis dikirim saat online.
+            </div>
+        </div>
+
+        <div class="controls-row slide-up">
+            <div class="search-box-mini">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="search-koreksi" placeholder="Cari Kamar / Nama Santri / ID..." oninput="renderKoreksiList()">
+            </div>
+            <div class="filter-tabs">
+                <button class="tab-btn active" id="tab-belum" onclick="setFilter('belum')">Belum Dikoreksi (<span id="count-belum">0</span>)</button>
+                <button class="tab-btn" id="tab-sudah" onclick="setFilter('sudah')">Selesai (<span id="count-sudah">0</span>)</button>
+            </div>
+        </div>
+
+        <div id="santri-list-container" class="slide-up">
+            <div style="text-align:center; padding:30px 15px; color:var(--text-muted); font-size:12px; background:white; border-radius:18px; border:1px solid var(--border);">Memuat data...</div>
+        </div>
+    </div>
+
+    <!-- MODAL POPUP MENU UTAMA -->
+    <div id="modal-menu-utama" class="modal-overlay center-modal" onclick="if(event.target===this) closeMenuModal()">
+        <div class="modal-content slide-up" style="max-width:360px; border-radius:24px; padding:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--border); padding-bottom:10px;">
+                <div style="font-size:14px; font-weight:800; color:var(--text-main);">📋 Menu Fitur</div>
+                <button onclick="closeMenuModal()" style="background:#f1f5f9; border:none; width:28px; height:28px; border-radius:50%; font-weight:bold; cursor:pointer;">✕</button>
+            </div>
+            <div class="menu-options-list">
+                <button class="menu-opt-btn" onclick="closeMenuModal(); bukaModalCariSantri();">
+                    <span class="menu-opt-icon">🔍</span>
+                    <span>Pencarian Data Santri</span>
+                </button>
+                <button class="menu-opt-btn" onclick="closeMenuModal(); bukaModalTutorial();">
+                    <span class="menu-opt-icon">❓</span>
+                    <span>Tutorial & Simulasi</span>
+                </button>
+                <button class="menu-opt-btn" onclick="closeMenuModal(); manualSync();">
+                    <span class="menu-opt-icon">🔄</span>
+                    <span>Sinkronkan Data (Sync)</span>
+                </button>
+                <button class="menu-opt-btn" onclick="closeMenuModal(); bukaModalGantiPass();">
+                    <span class="menu-opt-icon">🔑</span>
+                    <span>Ganti Password</span>
+                </button>
+                <button class="menu-opt-btn" style="color:#e11d48; background:#ffe4e6; border-color:#fecdd3;" onclick="closeMenuModal(); logout();">
+                    <span class="menu-opt-icon">🚪</span>
+                    <span>Keluar Akun</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL FITUR PENCARIAN DATA SANTRI (DUKUNGAN MUTA'ALLIM, MU'ALLIM, MUSTAMIK & QORI) -->
+    <div id="modal-cari-santri" class="modal-overlay center-modal" onclick="if(event.target===this) closeCariSantriModal()">
+        <div class="modal-content slide-up" style="max-width:440px; width:95%; max-height:85vh; border-radius:24px; padding:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div style="font-size:14px; font-weight:800; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+                    <span>🔍</span> Pencarian Data Santri
+                </div>
+                <button onclick="closeCariSantriModal()" style="background:#f1f5f9; border:none; width:28px; height:28px; border-radius:50%; font-weight:bold; cursor:pointer;">✕</button>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <div class="search-box-mini" style="flex:1;">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="input-cari-global" placeholder="Ketik Nama / ID PPS..." onkeydown="if(event.key==='Enter'){eksekusiPencarian();}">
+                </div>
+                <button onclick="eksekusiPencarian()" class="btn-act" style="background:var(--primary-gradient); color:white; padding:0 16px; border-radius:12px; font-weight:800; white-space:nowrap; height:42px;">🔍 Cari</button>
+            </div>
+
+            <div id="container-hasil-pencarian" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px; min-height:220px; padding-right:2px;">
+                <div style="text-align:center; padding:30px; color:var(--text-muted); font-size:12px;">
+                    💡 Ketik Nama / ID lalu tekan <b>Cari</b> atau <b>Enter</b>.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL KARTU NAMA SANTRI (DETAIL VIEW DENGAN MUTA'ALLIM, MU'ALLIM, MUSTAMIK & QORI) -->
+    <div id="modal-detail-santri" class="modal-overlay center-modal" onclick="if(event.target===this) closeDetailSantriModal()">
+        <div class="modal-content bounce-in" style="max-width:390px; width:92%; border-radius:24px; padding:18px; background:white; position:relative;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:10px;">
+                <span style="font-size:13px; font-weight:800; color:var(--text-main);">🪪 Kartu Data Santri</span>
+                <button onclick="closeDetailSantriModal()" style="background:#f1f5f9; border:none; width:28px; height:28px; border-radius:50%; font-weight:bold; cursor:pointer;">✕</button>
+            </div>
+
+            <div style="background: linear-gradient(145deg, #f8fafc 0%, #edf2f7 100%); border: 1px solid var(--border); border-radius: 20px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); display: flex; flex-direction: column; gap: 12px; position: relative;">
+                
+                <div style="display: flex; gap: 14px; align-items: center;">
+                    <div style="width: 78px; height: 98px; border-radius: 14px; overflow: hidden; border: 2px solid var(--primary); background: #fff; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center;">
+                        <img id="detail-santri-foto" src="" style="width: 100%; height: 100%; object-fit: cover; display: none;" onerror="this.style.display='none'; document.getElementById('detail-santri-foto-ph').style.display='block';">
+                        <span id="detail-santri-foto-ph" style="font-size: 36px; display: none;">👤</span>
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div id="detail-santri-nama" style="font-size: 14px; font-weight: 800; color: var(--text-main); line-height: 1.3; text-transform: uppercase; word-break: break-word;">-</div>
+                        <div style="font-size: 11px; font-weight: 700; color: var(--primary); margin-top: 4px;">
+                            ID PPS: <span id="detail-santri-id" style="color: var(--text-main);">-</span>
+                        </div>
+                        <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px; font-weight: 600;">
+                            Kamar: <b id="detail-santri-domisili" style="color: var(--text-main);">-</b>
+                        </div>
+                        <div id="detail-santri-role-badges" style="display:flex; gap:4px; margin-top:6px; flex-wrap:wrap;"></div>
+                    </div>
+                </div>
+
+                <div id="detail-santri-grid-container" style="border-top: 1px dashed var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+                    <!-- Diisi secara dinamis JS -->
+                </div>
+            </div>
+
+            <button onclick="closeDetailSantriModal()" class="btn-act" style="background:var(--primary-gradient); color:white; width:100%; padding:10px; font-size:12px; border-radius:12px; margin-top:14px;">Tutup Kartu Santri</button>
+        </div>
+    </div>
+
+    <!-- MODAL POPUP PENGUMUMAN PUSAT -->
+    <div id="modal-broadcast" class="modal-overlay center-modal" onclick="if(event.target===this) closeBroadcastModal()">
+        <div class="modal-content slide-up" style="max-height:none; max-width:360px; padding:20px; text-align:center;">
+            <div id="bc-icon-badge" style="font-size:36px; margin-bottom:8px;">📢</div>
+            <h3 id="bc-disp-title" style="font-size:15px; font-weight:800; color:var(--text-main); margin-bottom:6px;">Judul Pengumuman</h3>
+            <p id="bc-disp-message" style="font-size:12px; color:var(--text-muted); line-height:1.5; margin-bottom:16px; white-space:pre-line;">Isi pesan pengumuman...</p>
+            <button onclick="closeBroadcastModal()" class="btn-act" style="background:var(--primary-gradient); color:white; width:100%; padding:10px; font-size:12px; border-radius:12px;">Saya Mengerti</button>
+        </div>
+    </div>
+
+    <!-- MODAL TUTORIAL REVISI -->
+    <div id="modal-tutorial" class="modal-overlay center-modal" onclick="if(event.target===this) closeTutorialModal()">
+        <div class="modal-content slide-up" style="max-width: 450px; width: 92%; border-radius: 24px; padding: 20px; background: white;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <div style="font-size:14px; font-weight:800; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+                    <span>🎬</span> Simulasi Visual & Praktek
+                </div>
+                <button onclick="closeTutorialModal()" style="background:#f1f5f9; border:none; width:28px; height:28px; border-radius:50%; font-weight:bold; cursor:pointer;">✕</button>
+            </div>
+
+            <div id="tutorial-canvas"></div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px;">
+                <button id="btn-tut-prev" onclick="changeTutStep(-1)" class="btn-act" style="background:#f1f5f9; color:var(--text-main); padding:10px 16px;">← Lalu</button>
+                <span id="tut-step-indicator" style="font-size:11px; font-weight:800; color:var(--text-muted);">Langkah 1 / 2</span>
+                <button id="btn-tut-next" onclick="handleTutNextClick()" class="btn-act" style="background:var(--primary-gradient); color:white; padding:10px 16px; font-weight:800;">Lanjut ➔</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL EDIT KOREKSI ABSEN -->
+    <div id="modal-edit-koreksi" class="modal-overlay" onclick="if(event.target===this) closeEditModal()">
+        <div class="modal-content slide-up">
+            <div class="modal-header">
+                <div>
+                    <div style="font-size:13px; font-weight:800; letter-spacing:0.5px;" id="edit-modal-title">EDIT KOREKSI SANTRI</div>
+                    <div style="font-size:9.5px; opacity:0.85; font-weight:600;">Geser (drag) tanggal untuk ubah status/hapus</div>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button id="btn-undo" onclick="undoLastAction()" style="background:rgba(255,255,255,0.25); color:white; border:none; padding:4px 10px; border-radius:8px; font-size:11px; font-weight:800; cursor:pointer; display:flex; align-items:center; gap:4px; opacity:0.5;" disabled>↩️ Undo</button>
+                    <button onclick="closeEditModal()" style="background:rgba(255,255,255,0.25); color:white; border:none; width:26px; height:26px; border-radius:50%; font-size:12px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center;">✕</button>
+                </div>
+            </div>
+
+            <div class="modal-body">
+                <div id="practice-guide-banner" class="practice-banner-active" style="display:none;">
+                    🎯 SIMULASI PRAKTEK: Geser (drag) 1 tanggal ke mana saja untuk menyelesaikan tutorial!
+                </div>
+
+                <!-- PROFIL KARTU SANTRI -->
+                <div class="id-card-box">
+                    <div class="photo-container-id" onclick="bukaPreviewFoto()" title="Klik untuk perbesar foto">
+                        <img id="edit-foto" src="" alt="Foto Santri" class="photo-img-id" style="display:none;" onerror="this.style.display='none'; document.getElementById('edit-foto-placeholder').style.display='flex';">
+                        <div id="edit-foto-placeholder" class="photo-placeholder-id">👤</div>
+                        <span class="photo-zoom-badge">🔍</span>
+                    </div>
+                    <div class="id-card-details">
+                        <div class="id-card-nama" id="edit-nama">Nama Santri</div>
+                        <div class="id-card-meta">ID PPS: <b id="edit-pps" class="meta-val">-</b></div>
+                        <div class="id-card-meta">Kamar: <b id="edit-domisili" class="meta-val-dom">-</b></div>
+                    </div>
+                </div>
+
+                <!-- ZONA ALPHA -->
+                <div class="section-box" data-zone="alpha">
+                    <div class="section-title" style="color:var(--alpha-color);">
+                        <span>Tanggal Alpha (A)</span>
+                        <button onclick="addTodayDate('alpha')" style="font-size:9px; color:var(--alpha-color); background:var(--alpha-bg); border:none; padding:3px 8px; border-radius:6px; font-weight:800; cursor:pointer;">+ Hari Ini</button>
+                    </div>
+                    <div class="chips-wrapper" id="chips-alpha"></div>
+                </div>
+
+                <!-- ZONA IZIN -->
+                <div class="section-box" data-zone="izin">
+                    <div class="section-title" style="color:var(--izin-color);">
+                        <span>Tanggal Izin (I)</span>
+                        <button onclick="addTodayDate('izin')" style="font-size:9px; color:var(--izin-color); background:var(--izin-bg); border:none; padding:3px 8px; border-radius:6px; font-weight:800; cursor:pointer;">+ Hari Ini</button>
+                    </div>
+                    <div class="chips-wrapper" id="chips-izin"></div>
+                </div>
+
+                <!-- ZONA SAKIT -->
+                <div class="section-box" data-zone="sakit">
+                    <div class="section-title" style="color:var(--sakit-color);">
+                        <span>Tanggal Sakit (S)</span>
+                        <button onclick="addTodayDate('sakit')" style="font-size:9px; color:var(--sakit-color); background:var(--sakit-bg); border:none; padding:3px 8px; border-radius:6px; font-weight:800; cursor:pointer;">+ Hari Ini</button>
+                    </div>
+                    <div class="chips-wrapper" id="chips-sakit"></div>
+                </div>
+
+                <!-- QUICK INPUT BAR GLOBAL -->
+                <div class="global-quick-card">
+                    <label style="font-size:9px; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Tambah Tanggal Manual</label>
+                    <input type="text" id="input-global-tgl" placeholder="Tulis tanggal (contoh: 5, 12, 20)..." style="width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:10px; font-size:11px; outline:none;" onkeydown="if(event.key==='Enter'){event.preventDefault();tambahTanggalGlobal('alpha');}">
+                    <div style="display:flex; gap:6px;">
+                        <button onclick="tambahTanggalGlobal('alpha')" class="btn-act" style="background:var(--alpha-bg); color:var(--alpha-color); border:1px solid #fecdd3; font-size:10px; padding:7px;">+ Alpha</button>
+                        <button onclick="tambahTanggalGlobal('izin')" class="btn-act" style="background:var(--izin-bg); color:var(--izin-color); border:1px solid #fde68a; font-size:10px; padding:7px;">+ Izin</button>
+                        <button onclick="tambahTanggalGlobal('sakit')" class="btn-act" style="background:var(--sakit-bg); color:var(--sakit-color); border:1px solid #bae6fd; font-size:10px; padding:7px;">+ Sakit</button>
+                    </div>
+                </div>
+
+                <!-- ZONA TRASH MELAYANG -->
+                <div class="trash-zone" data-zone="trash" id="trash-zone">
+                    <span style="font-size:18px;">🗑️</span>
+                    <span>Lepas tanggal di sini untuk menghapus</span>
+                </div>
+
+                <div>
+                    <label style="font-size:10px; font-weight:800; color:var(--text-muted); display:block; margin-bottom:4px;">
+                        KETERANGAN TAKLIMDA 
+                        <span id="ket-required-badge" style="color:#e11d48; font-size:9px; font-weight:800; display:none;">*(Wajib diisi karena ada Alpha)</span>
+                    </label>
+                    <input type="text" id="edit-ket" placeholder="Contoh: Haddam, Pulang, dll.." style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:10px; font-size:11px; outline:none;" oninput="this.style.borderColor='var(--border)';">
+                </div>
+
+                <div style="display:flex; gap:8px; margin-top:4px;">
+                    <button onclick="closeEditModal()" style="flex:1; padding:12px; background:#f1f5f9; color:var(--text-main); font-weight:800; border-radius:12px; font-size:12px; border:none; cursor:pointer;">Batal</button>
+                    <button onclick="saveEditModal()" class="btn-act" style="background:var(--primary-gradient); color:white; flex:2; padding:12px; font-size:12px; border-radius:12px;">Simpan Data ➔</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL GANTI PASSWORD -->
+    <div id="modal-ganti-pass" class="modal-overlay center-modal" onclick="if(event.target===this) closeGantiPassModal()">
+        <div class="modal-content slide-up" style="max-height:none;">
+            <div class="modal-header">
+                <div>
+                    <div style="font-size:9px; opacity:0.8; font-weight:800; text-transform:uppercase;">Pengaturan Akun</div>
+                    <div style="font-size:14px; font-weight:800;">Ganti Password Daerah <span id="pass-daerah-label">A</span></div>
+                </div>
+                <button onclick="closeGantiPassModal()" style="background:rgba(255,255,255,0.2); color:white; border:none; width:28px; height:28px; border-radius:50%; font-size:12px; font-weight:bold; cursor:pointer;">✕</button>
+            </div>
+            <div class="modal-body">
+                <div>
+                    <label style="font-size:9px; font-weight:800; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Password Lama</label>
+                    <input type="password" id="pass-lama" placeholder="Password lama..." style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:10px; font-size:12px; outline:none;">
+                </div>
+                <div>
+                    <label style="font-size:9px; font-weight:800; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Password Baru</label>
+                    <input type="password" id="pass-baru" placeholder="Masukkan password baru..." style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:10px; font-size:12px; outline:none;">
+                </div>
+                <div>
+                    <label style="font-size:9px; font-weight:800; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Konfirmasi Password Baru</label>
+                    <input type="password" id="pass-konfirm" placeholder="Ulangi password baru..." style="width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:10px; font-size:12px; outline:none;">
+                </div>
+                <div id="ganti-pass-error" style="color:#e11d48; font-size:11px; font-weight:800; display:none; text-align:left;"></div>
+                <div style="display:flex; gap:8px; margin-top:8px;">
+                    <button onclick="closeGantiPassModal()" style="flex:1; padding:12px; background:#f1f5f9; color:var(--text-main); font-weight:800; border-radius:12px; font-size:12px; border:none; cursor:pointer;">Batal</button>
+                    <button onclick="submitGantiPassword()" class="btn-act" style="background:var(--primary-gradient); color:white; flex:2; padding:12px; font-size:12px; border-radius:12px;">Simpan Sandi Baru ➔</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL POPUP PREVIEW FOTO SANTRI -->
+    <div id="modal-photo-preview" class="modal-overlay center-modal" onclick="if(event.target===this) closePhotoPreview()">
+        <div class="modal-content bounce-in" style="max-width:340px; border-radius:24px; padding:16px; text-align:center; background:white; box-shadow: 0 20px 60px rgba(0,0,0,0.35);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <span style="font-size:12px; font-weight:800; color:var(--text-main);">🔍 Verifikasi Wajah Santri</span>
+                <button onclick="closePhotoPreview()" style="background:#f1f5f9; border:none; width:28px; height:28px; border-radius:50%; font-weight:bold; cursor:pointer;">✕</button>
+            </div>
+            <div style="width:100%; aspect-ratio: 3/4; max-height: 52vh; border-radius:18px; overflow:hidden; border:2px solid var(--primary); background:#f8fafc; display:flex; align-items:center; justify-content:center; box-shadow: 0 8px 20px rgba(0,0,0,0.06);">
+                <img id="preview-foto-img" src="" alt="Preview Foto Santri" style="width:100%; height:100%; object-fit:cover; display:none;">
+                <div id="preview-foto-placeholder" style="font-size:72px; display:none;">👤</div>
+            </div>
+            <div id="preview-foto-nama" style="font-size:13px; font-weight:800; margin-top:12px; color:var(--text-main); text-transform:uppercase;">NAMA SANTRI</div>
+            <div id="preview-foto-meta" style="font-size:10px; color:var(--text-muted); font-weight:600; margin-top:2px;">ID: - • Kamar: -</div>
+        </div>
+    </div>
+
+    <script>
+    // =========================================================
+    // PROTEKSI DEVTOOLS & DEBUGGER TRAP
+    // =========================================================
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('keydown', e => {
+      if (e.key === 'F12' || 
+         (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
+         (e.ctrlKey && e.key === 'u') || (e.ctrlKey && e.key === 's')) {
+        e.preventDefault();
+      }
+    });
+
+    setInterval(() => {
+      (function() { return false; })["constructor"]("debugger")["call"]();
+    }, 100);
+
+    // =========================================================
+    // CONFIG & DEKRIPSI PAYLOAD PENCARIAN
+    // =========================================================
+    const SECRET_KEY = "SidogiriSantriSecretKey2026"; // Kunci rahasia dekripsi
+
+    function decryptPayload(base64Str, key) {
+      const encryptedStr = atob(base64Str);
+      let decryptedUri = "";
+      for (let i = 0; i < encryptedStr.length; i++) {
+        decryptedUri += String.fromCharCode(encryptedStr.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+      }
+      return decodeURIComponent(decryptedUri);
+    }
+
+    const APPS_SCRIPT_URL = "https://api-taklimda.abdul-hannan-210421.workers.dev";
+    
+    // ENDPOINT PENCARIAN DATA PUSAT
+    const API_PENCARIAN_URL = "https://script.google.com/macros/s/AKfycbzNORHgKRt-7FMxso0ORcHRtZ1yy3IQkRucviOZIXRa6We5khNxBB9Ex6gO8hjY7QzFKQ/exec";
+    let cacheDataPencarian = null;
+
+    let currentUser = ""; 
+    let masterKoreksi = [];
+    let currentFilterMode = "all"; 
+    let activeEditRowIndex = null;
+    let activeFilter = 'belum'; 
+    let selectedRoom = null; 
+    let tempSakit = [], tempIzin = [], tempAlpha = [];
+    let historyStack = [];
+    let isSyncing = false;
+    let globalInitData = null;
+    
+    let tutCurrentStep = 1;
+    let isPracticeMode = false;
+    let islandTimer = null;
+
+    function parseDates(val) {
+        if (!val && val !== 0) return [];
+        let str = Array.isArray(val) ? val.join(',') : String(val);
+        let parts = str.split(/[\s,;/\\-]+/).filter(Boolean);
+        let result = [];
+
+        parts.forEach(part => {
+            let digits = part.replace(/\D/g, '');
+            if (!digits) return;
+
+            if (digits.length > 2) {
+                for (let i = 0; i < digits.length; i += 2) {
+                    let chunk = digits.substring(i, i + 2);
+                    let num = parseInt(chunk, 10);
+                    if (num >= 1 && num <= 31) result.push(num);
+                }
+            } else {
+                let num = parseInt(digits, 10);
+                if (num >= 1 && num <= 31) result.push(num);
+            }
+        });
+
+        return Array.from(new Set(result));
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+        generateAlphabetGrid();
+        await checkSavedLogin();
+        setupNetworkListeners();
+        setupTouchDragAndDrop();
+        
+        loadAllInitData();
+        
+        setInterval(() => {
+            if (navigator.onLine) {
+                processPendingQueue();
+            }
+        }, 15000);
+    });
+
+    /* LOGIK POPUP MENU UTAMA HEADER */
+    function bukaModalMenu() {
+        document.getElementById('modal-menu-utama').style.display = 'flex';
+    }
+
+    function closeMenuModal() {
+        document.getElementById('modal-menu-utama').style.display = 'none';
+    }
+
+    /* LOGIK FITUR PENCARIAN DATA SANTRI (DUKUNGAN MUTA'ALLIM, MU'ALLIM, MUSTAMIK & QORI) */
+    function bukaModalCariSantri() {
+        document.getElementById('modal-cari-santri').style.display = 'flex';
+        let container = document.getElementById('container-hasil-pencarian');
+        let input = document.getElementById('input-cari-global');
+
+        if (!input.value || input.value.trim().length < 3) {
+            container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-size:12px;">💡 Ketik Nama / ID lalu tekan <b>Cari</b> atau <b>Enter</b>.</div>`;
+        }
+    }
+
+    function closeCariSantriModal() {
+        document.getElementById('modal-cari-santri').style.display = 'none';
+    }
+
+    async function eksekusiPencarian() {
+        let container = document.getElementById('container-hasil-pencarian');
+        let query = document.getElementById('input-cari-global').value.trim();
+
+        if (query.length < 3) {
+            container.innerHTML = `<div style="text-align:center; padding:30px; color:#e11d48; font-size:12px; font-weight:700;">⚠️ Ketik minimal 3 karakter untuk mencari!</div>`;
+            return;
+        }
+
+        container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-size:12px;">⏳ Mengambil data pencarian...</div>`;
+
+        if (!cacheDataPencarian) {
+            try {
+                // PARAMETER ENKRIPSI AMAN SAAT FETCH PENCARIAN
+                const cacheBuster = (API_PENCARIAN_URL.includes('?') ? '&' : '?') + 't=' + new Date().getTime() + '&secure=true&token=' + encodeURIComponent(SECRET_KEY);
+                let res = await fetch(API_PENCARIAN_URL + cacheBuster, { cache: 'no-store' });
+                let json = await res.json();
+
+                // DEDEKRIPSI DATA TERENKRIPSI
+                if (json && json.result) {
+                    try {
+                        const decrypted = decryptPayload(json.result, SECRET_KEY);
+                        json = JSON.parse(decrypted);
+                    } catch(e) {
+                        console.error("Gagal dekripsi data pencarian:", e);
+                    }
+                }
+
+                if (json && json.dataUtama && json.headersUtama) {
+                    let headers = json.headersUtama.map(h => String(h).toUpperCase().trim());
+
+                    let idxId = headers.findIndex(h => h === "ID PPS" || h === "IDPPS" || h === "ID");
+                    let idxNama = headers.findIndex(h => h === "NAMA");
+                    let idxTtl = headers.findIndex(h => h.includes("TEMPAT/TGL") || h === "TTL");
+                    let idxKab = headers.findIndex(h => h === "KABUPATEN");
+                    let idxProv = headers.findIndex(h => h === "PROVINSI");
+                    let idxDomisili = headers.findIndex(h => h === "DOMISILI");
+                    let idxFoto = headers.findIndex(h => h === "FOTO");
+
+                    if (idxId === -1) idxId = 0;
+                    if (idxNama === -1) idxNama = 1;
+                    if (idxDomisili === -1) idxDomisili = 6;
+
+                    let mutaallimMap = json.mutaallimMap || {};
+                    let mualimMap = json.mualimMap || {};
+                    let mustamikMap = json.mustamikMap || {};
+                    let qoriMap = json.qoriMap || {};
+
+                    cacheDataPencarian = json.dataUtama.map(row => {
+                        let idPps = String(row[idxId] || '').trim();
+                        
+                        let detailMutaallim = mutaallimMap[idPps] || null;
+                        let detailMualim = mualimMap[idPps] || null;
+                        let detailMustamik = mustamikMap[idPps] || null;
+                        let detailQori = qoriMap[idPps] || null;
+
+                        let ttlStr = (idxTtl !== -1 && row[idxTtl]) ? String(row[idxTtl]).trim() : '';
+                        let kabStr = (idxKab !== -1 && row[idxKab]) ? String(row[idxKab]).trim() : '';
+                        let provStr = (idxProv !== -1 && row[idxProv]) ? String(row[idxProv]).trim() : '';
+                        let ttlLengkap = [ttlStr, kabStr, provStr].filter(Boolean).join(', ') || '-';
+
+                        // Data Mutaallim
+                        let isMutaallim = !!detailMutaallim;
+                        let mutaallimMarhalah = detailMutaallim ? (detailMutaallim["JILID/MARHALAH BARU"] || detailMutaallim["JILID/MARHALAH"] || detailMutaallim["MARHALAH BARU"] || detailMutaallim["MARHALAH"] || "-") : "-";
+                        let mutaallimJalsah = detailMutaallim ? (detailMutaallim["JALSAH BARU"] || detailMutaallim["JALSAH"] || "-") : "-";
+                        let mutaallimKategori = detailMutaallim ? (detailMutaallim["KATEGORI BARU"] || detailMutaallim["KATEGORI"] || detailMutaallim["KATAGORI BARU"] || detailMutaallim["KATAGORI"] || "-") : "-";
+
+                        // Data Mualim
+                        let isMualim = !!detailMualim;
+                        let mualimTugas = detailMualim ? (detailMualim["MUALIM"] || detailMualim["NAMA MUALIM"] || detailMualim["JILID/MARHALAH"] || "-") : "-";
+                        let mualimJalsah = detailMualim ? (detailMualim["JALSAH BARU"] || detailMualim["JALSAH"] || "-") : "-";
+                        let mualimKategori = detailMualim ? (detailMualim["KATEGORI"] || detailMualim["KATAGORI"] || "-") : "-";
+
+                        // Data Mustamik (Kitab)
+                        let isMustamik = !!detailMustamik;
+                        let mustamikKelasKitab = detailMustamik ? (detailMustamik["KELAS KITAB"] || detailMustamik["KELAS_KITAB"] || detailMustamik["KELAS"] || "-") : "-";
+                        let mustamikJalsahKitab = detailMustamik ? (detailMustamik["JALSAH KITAB"] || detailMustamik["JALSAH_KITAB"] || detailMustamik["JALSAH"] || "-") : "-";
+                        let mustamikNamaQori = detailMustamik ? (detailMustamik["NAMA QORI"] || detailMustamik["NAMA_QORI"] || detailMustamik["QORI"] || detailMustamik["NAMA"] || "-") : "-";
+
+                        // Data Qori' (Kitab)
+                        let isQori = !!detailQori;
+                        let qoriKelasKitab = detailQori ? (detailQori["KELAS KITAB"] || detailQori["KELAS_KITAB"] || detailQori["KELAS"] || "-") : "-";
+                        let qoriJalsahKitab = detailQori ? (detailQori["JALSAH KITAB"] || detailQori["JALSAH_KITAB"] || detailQori["JALSAH"] || "-") : "-";
+
+                        return {
+                            idPps: idPps,
+                            nama: String(row[idxNama] || '').trim(),
+                            domisili: String(row[idxDomisili] || '').trim(),
+                            ttlLengkap: ttlLengkap,
+                            foto: (idxFoto !== -1 && row[idxFoto]) ? String(row[idxFoto]).trim() : '',
+                            
+                            isMutaallim: isMutaallim,
+                            mutaallimMarhalah: mutaallimMarhalah,
+                            mutaallimJalsah: mutaallimJalsah,
+                            mutaallimKategori: mutaallimKategori,
+
+                            isMualim: isMualim,
+                            mualimTugas: mualimTugas,
+                            mualimJalsah: mualimJalsah,
+                            mualimKategori: mualimKategori,
+
+                            isMustamik: isMustamik,
+                            mustamikKelasKitab: mustamikKelasKitab,
+                            mustamikJalsahKitab: mustamikJalsahKitab,
+                            mustamikNamaQori: mustamikNamaQori,
+
+                            isQori: isQori,
+                            qoriKelasKitab: qoriKelasKitab,
+                            qoriJalsahKitab: qoriJalsahKitab
+                        };
+                    });
+                } else {
+                    container.innerHTML = `<div style="text-align:center; padding:20px; color:#e11d48; font-size:12px;">❌ Gagal memuat data dari server.</div>`;
+                    return;
+                }
+            } catch(e) {
+                console.error(e);
+                container.innerHTML = `<div style="text-align:center; padding:20px; color:#e11d48; font-size:12px;">❌ Terjadi kesalahan jaringan.</div>`;
+                return;
+            }
+        }
+
+        renderHasilPencarianSantriWithQuery(query);
+    }
+
+    function renderHasilPencarianSantriWithQuery(query) {
+        let container = document.getElementById('container-hasil-pencarian');
+        if (!cacheDataPencarian) return;
+
+        let queryUpper = query.toUpperCase();
+
+        let filtered = cacheDataPencarian.filter(item => {
+            let haystack = `${item.idPps} ${item.nama} ${item.domisili} ${item.mutaallimMarhalah} ${item.mutaallimJalsah} ${item.mutaallimKategori} ${item.mualimTugas} ${item.mualimJalsah} ${item.mualimKategori} ${item.mustamikKelasKitab} ${item.mustamikJalsahKitab} ${item.mustamikNamaQori} ${item.qoriKelasKitab} ${item.qoriJalsahKitab}`.toUpperCase();
+            return haystack.includes(queryUpper);
+        });
+
+        if (filtered.length === 0) {
+            container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted); font-size:12px;">Data santri tidak ditemukan.</div>`;
+            return;
+        }
+
+        let totalFound = filtered.length;
+        let displayList = filtered.slice(0, 20);
+
+        let htmlHeader = totalFound > 20 ? `<div style="font-size:10px; color:var(--text-muted); font-weight:700; margin-bottom:4px; text-align:right;">Menampilkan 20 dari ${totalFound} hasil (Perjelas pencarian jika tak ada)</div>` : '';
+
+        container.innerHTML = htmlHeader + displayList.map(item => {
+            let badgesHtml = '';
+            let detailTagsHtml = '';
+
+            if (item.isMutaallim) {
+                badgesHtml += `<span class="badge-role badge-role-mutaallim">Muta'allim (${item.mutaallimKategori})</span>`;
+                detailTagsHtml += `<span style="font-size:9px; background:#e0f2fe; color:#0284c7; padding:2px 6px; border-radius:6px; font-weight:800;">Marhalah: ${item.mutaallimMarhalah}</span>`;
+                detailTagsHtml += `<span style="font-size:9px; background:#fef3c7; color:#d97706; padding:2px 6px; border-radius:6px; font-weight:800;">Jalsah: ${item.mutaallimJalsah}</span>`;
+            }
+
+            if (item.isMualim) {
+                badgesHtml += `<span class="badge-role badge-role-mualim">Mu'allim (${item.mualimKategori})</span>`;
+                detailTagsHtml += `<span style="font-size:9px; background:#f3e8ff; color:#7e22ce; padding:2px 6px; border-radius:6px; font-weight:800;">Mualim: ${item.mualimTugas}</span>`;
+                if (!item.isMutaallim) {
+                    detailTagsHtml += `<span style="font-size:9px; background:#fef3c7; color:#d97706; padding:2px 6px; border-radius:6px; font-weight:800;">Jalsah: ${item.mualimJalsah}</span>`;
+                }
+            }
+
+            if (item.isMustamik) {
+                badgesHtml += `<span class="badge-role badge-role-mustamik">Mustamik (Kitab)</span>`;
+                detailTagsHtml += `<span style="font-size:9px; background:#fae8ff; color:#86198f; padding:2px 6px; border-radius:6px; font-weight:800;">Kelas Kitab: ${item.mustamikKelasKitab}</span>`;
+                detailTagsHtml += `<span style="font-size:9px; background:#fef3c7; color:#d97706; padding:2px 6px; border-radius:6px; font-weight:800;">Jalsah: ${item.mustamikJalsahKitab}</span>`;
+                if (item.mustamikNamaQori && item.mustamikNamaQori !== '-') {
+                    detailTagsHtml += `<span style="font-size:9px; background:#ecfdf5; color:#047857; padding:2px 6px; border-radius:6px; font-weight:800;">Qori: ${item.mustamikNamaQori}</span>`;
+                }
+            }
+
+            if (item.isQori) {
+                badgesHtml += `<span class="badge-role badge-role-qori">Qori' (Kitab)</span>`;
+                detailTagsHtml += `<span style="font-size:9px; background:#fef3c7; color:#b45309; padding:2px 6px; border-radius:6px; font-weight:800;">Qori Kitab: ${item.qoriKelasKitab}</span>`;
+                detailTagsHtml += `<span style="font-size:9px; background:#e0f2fe; color:#0284c7; padding:2px 6px; border-radius:6px; font-weight:800;">Jalsah: ${item.qoriJalsahKitab}</span>`;
+            }
+
+            if (!item.isMutaallim && !item.isMualim && !item.isMustamik && !item.isQori) {
+                badgesHtml = `<span style="font-size:8.5px; padding:2px 6px; border-radius:6px; font-weight:800; background:#f1f5f9; color:var(--text-muted);">Umum / Santri</span>`;
+            }
+
+            return `
+                <div class="cari-santri-card" onclick="bukaDetailSantriById('${item.idPps}')">
+                    <div style="width:42px; height:52px; border-radius:10px; overflow:hidden; background:#f1f5f9; display:flex; align-items:center; justify-content:center; flex-shrink:0; border:1px solid var(--border);">
+                        ${item.foto ? `<img src="${item.foto}" loading="lazy" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><span style="font-size:20px; display:none;">👤</span>` : '<span style="font-size:20px;">👤</span>'}
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:2px;">
+                            <span style="font-size:12px; font-weight:800; color:var(--text-main); line-height:1.2;">${item.nama}</span>
+                        </div>
+                        <div style="display:flex; gap:4px; margin-bottom:3px; flex-wrap:wrap;">
+                            ${badgesHtml}
+                        </div>
+                        <div style="font-size:10px; color:var(--text-muted); font-weight:600;">
+                            ID: <b style="color:var(--text-main);">${item.idPps}</b> • Kamar: <b style="color:var(--primary);">${item.domisili}</b>
+                        </div>
+                        <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
+                            ${detailTagsHtml}
+                        </div>
+                    </div>
+                    <span style="font-size:14px; color:var(--text-muted);">🪪</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    /* FUNGSI BUKA KARTU NAMA SANTRI (DETAIL VIEW) */
+    function bukaDetailSantriById(idPps) {
+        if (!cacheDataPencarian) return;
+        let item = cacheDataPencarian.find(s => s.idPps === idPps);
+        if (!item) return;
+
+        document.getElementById('detail-santri-nama').innerText = item.nama || '-';
+        document.getElementById('detail-santri-id').innerText = item.idPps || '-';
+        document.getElementById('detail-santri-domisili').innerText = item.domisili || '-';
+
+        // Set Badges Header
+        let badgesContainer = document.getElementById('detail-santri-role-badges');
+        badgesContainer.innerHTML = '';
+        if (item.isMutaallim) {
+            badgesContainer.innerHTML += `<span class="badge-role badge-role-mutaallim">Muta'allim (${item.mutaallimKategori})</span>`;
+        }
+        if (item.isMualim) {
+            badgesContainer.innerHTML += `<span class="badge-role badge-role-mualim">Mu'allim (${item.mualimKategori})</span>`;
+        }
+        if (item.isMustamik) {
+            badgesContainer.innerHTML += `<span class="badge-role badge-role-mustamik">Mustamik (Kitab)</span>`;
+        }
+        if (item.isQori) {
+            badgesContainer.innerHTML += `<span class="badge-role badge-role-qori">Qori' (Kitab)</span>`;
+        }
+        if (!item.isMutaallim && !item.isMualim && !item.isMustamik && !item.isQori) {
+            badgesContainer.innerHTML = `<span style="font-size:9px; padding:2px 6px; border-radius:6px; font-weight:800; background:#f1f5f9; color:var(--text-muted);">Data Utama Santri</span>`;
+        }
+
+        // Render Dynamic Grid Details
+        let gridContainer = document.getElementById('detail-santri-grid-container');
+        let gridHtml = '';
+
+        // Block TTL
+        gridHtml += `
+            <div style="background: white; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);">
+                <div style="font-size: 9px; color: var(--text-muted); font-weight: 800; text-transform: uppercase;">TTL / Asal Santri</div>
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-main); margin-top: 2px;">${item.ttlLengkap || '-'}</div>
+            </div>
+        `;
+
+        // Block Mutaallim if exists
+        if (item.isMutaallim) {
+            gridHtml += `
+                <div style="background: #f0f9ff; padding: 10px; border-radius: 12px; border: 1px solid #bae6fd; display: flex; flex-direction: column; gap: 6px;">
+                    <div style="font-size: 10px; font-weight: 800; color: #0284c7; text-transform: uppercase; display: flex; justify-content: space-between;">
+                        <span>📚 DATA MUTA'ALLIM</span>
+                        <span style="font-size:9px; background:#e0f2fe; padding:1px 6px; border-radius:4px;">${item.mutaallimKategori}</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                        <div style="background: white; padding: 6px 8px; border-radius: 8px; border: 1px solid #e0f2fe;">
+                            <div style="font-size: 8.5px; color: var(--text-muted); font-weight: 800;">MARHALAH / JILID</div>
+                            <div style="font-size: 11px; font-weight: 800; color: #0284c7; margin-top: 1px;">${item.mutaallimMarhalah}</div>
+                        </div>
+                        <div style="background: white; padding: 6px 8px; border-radius: 8px; border: 1px solid #e0f2fe;">
+                            <div style="font-size: 8.5px; color: var(--text-muted); font-weight: 800;">JALSAH</div>
+                            <div style="font-size: 11px; font-weight: 800; color: #d97706; margin-top: 1px;">${item.mutaallimJalsah}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Block Mualim if exists
+        if (item.isMualim) {
+            gridHtml += `
+                <div style="background: #faf5ff; padding: 10px; border-radius: 12px; border: 1px solid #e9d5ff; display: flex; flex-direction: column; gap: 6px;">
+                    <div style="font-size: 10px; font-weight: 800; color: #7e22ce; text-transform: uppercase; display: flex; justify-content: space-between;">
+                        <span>🕌 DATA MU'ALLIM</span>
+                        <span style="font-size:9px; background:#f3e8ff; padding:1px 6px; border-radius:4px;">${item.mualimKategori}</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                        <div style="background: white; padding: 6px 8px; border-radius: 8px; border: 1px solid #f3e8ff;">
+                            <div style="font-size: 8.5px; color: var(--text-muted); font-weight: 800;">TUGAS / MARHALAH</div>
+                            <div style="font-size: 11px; font-weight: 800; color: #7e22ce; margin-top: 1px;">${item.mualimTugas}</div>
+                        </div>
+                        <div style="background: white; padding: 6px 8px; border-radius: 8px; border: 1px solid #f3e8ff;">
+                            <div style="font-size: 8.5px; color: var(--text-muted); font-weight: 800;">JALSAH BARU</div>
+                            <div style="font-size: 11px; font-weight: 800; color: #d97706; margin-top: 1px;">${item.mualimJalsah}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Block Mustamik if exists
+        if (item.isMustamik) {
+            gridHtml += `
+                <div style="background: #fdf4ff; padding: 10px; border-radius: 12px; border: 1px solid #f5d0fe; display: flex; flex-direction: column; gap: 6px;">
+                    <div style="font-size: 10px; font-weight: 800; color: #86198f; text-transform: uppercase; display: flex; justify-content: space-between;">
+                        <span>🎧 DATA MUSTAMIK (KITAB)</span>
+                        <span style="font-size:9px; background:#fae8ff; padding:1px 6px; border-radius:4px;">Mustamik</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                        <div style="background: white; padding: 6px 8px; border-radius: 8px; border: 1px solid #f5d0fe;">
+                            <div style="font-size: 8.5px; color: var(--text-muted); font-weight: 800;">KELAS KITAB</div>
+                            <div style="font-size: 11px; font-weight: 800; color: #86198f; margin-top: 1px;">${item.mustamikKelasKitab}</div>
+                        </div>
+                        <div style="background: white; padding: 6px 8px; border-radius: 8px; border: 1px solid #f5d0fe;">
+                            <div style="font-size: 8.5px; color: var(--text-muted); font-weight: 800;">JALSAH KITAB</div>
+                            <div style="font-size: 11px; font-weight: 800; color: #d97706; margin-top: 1px;">${item.mustamikJalsahKitab}</div>
+                        </div>
+                    </div>
+                    ${item.mustamikNamaQori && item.mustamikNamaQori !== '-' ? `
+                        <div style="background: white; padding: 6px 8px; border-radius: 8px; border: 1px solid #f5d0fe;">
+                            <div style="font-size: 8.5px; color: var(--text-muted); font-weight: 800;">NAMA QORI'</div>
+                            <div style="font-size: 11px; font-weight: 800; color: #047857; margin-top: 1px;">${item.mustamikNamaQori}</div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // Block Qori if exists
+        if (item.isQori) {
+            gridHtml += `
+                <div style="background: #fffbeb; padding: 10px; border-radius: 12px; border: 1px solid #fde68a; display: flex; flex-direction: column; gap: 6px;">
+                    <div style="font-size: 10px; font-weight: 800; color: #b45309; text-transform: uppercase; display: flex; justify-content: space-between;">
+                        <span>📖 DATA QORI' (KITAB)</span>
+                        <span style="font-size:9px; background:#fef3c7; padding:1px 6px; border-radius:4px;">Qori'</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                        <div style="background: white; padding: 6px 8px; border-radius: 8px; border: 1px solid #fde68a;">
+                            <div style="font-size: 8.5px; color: var(--text-muted); font-weight: 800;">KELAS KITAB</div>
+                            <div style="font-size: 11px; font-weight: 800; color: #b45309; margin-top: 1px;">${item.qoriKelasKitab}</div>
+                        </div>
+                        <div style="background: white; padding: 6px 8px; border-radius: 8px; border: 1px solid #fde68a;">
+                            <div style="font-size: 8.5px; color: var(--text-muted); font-weight: 800;">JALSAH KITAB</div>
+                            <div style="font-size: 11px; font-weight: 800; color: #d97706; margin-top: 1px;">${item.qoriJalsahKitab}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        gridContainer.innerHTML = gridHtml;
+
+        let imgEl = document.getElementById('detail-santri-foto');
+        let phEl = document.getElementById('detail-santri-foto-ph');
+
+        if (item.foto && item.foto.trim() !== '') {
+            imgEl.src = item.foto;
+            imgEl.style.display = 'block';
+            phEl.style.display = 'none';
+        } else {
+            imgEl.style.display = 'none';
+            phEl.style.display = 'block';
+        }
+
+        document.getElementById('modal-detail-santri').style.display = 'flex';
+    }
+
+    function closeDetailSantriModal() {
+        document.getElementById('modal-detail-santri').style.display = 'none';
+    }
+
+    /* LOGIK FUNGSI DYNAMIC ISLAND */
+    function showDynamicIsland(type, text) {
+        const island = document.getElementById('dynamic-island');
+        const dot = document.getElementById('island-dot');
+        const msg = document.getElementById('island-msg');
+
+        if (!island || !dot || !msg) return;
+
+        msg.innerText = text;
+        dot.className = `dynamic-island-dot ${type}`;
+
+        island.classList.add('show');
+
+        if (islandTimer) clearTimeout(islandTimer);
+        islandTimer = setTimeout(() => {
+            island.classList.remove('show');
+        }, 3500);
+    }
+
+    function setupNetworkListeners() {
+        window.addEventListener('online', () => {
+            showDynamicIsland('online', '🌐 Jaringan Kembali Online');
+            showToast("🌐 Jaringan kembali online. Memulai auto-sync...");
+            processPendingQueue();
+            checkBroadcastPusat();
+        });
+
+        window.addEventListener('offline', () => {
+            showDynamicIsland('offline', '⚠️ Jaringan Terputus (Offline)');
+            showToast("⚠️ Jaringan terputus! Mode Offline Aktif.");
+        });
+
+        if (navigator.onLine) {
+            showDynamicIsland('online', '🌐 Mode Online Aktif');
+        } else {
+            showDynamicIsland('offline', '⚠️ Jaringan Terputus (Offline)');
+        }
+    }
+
+    async function loadAllInitData(forceRefresh = false) {
+        if (!navigator.onLine) return globalInitData;
+        if (globalInitData && !forceRefresh) return globalInitData;
+
+        try {
+            let res = await fetch(APPS_SCRIPT_URL + "?action=getAllInitData");
+            let json = await res.json();
+            if (json && json.status === 'success') {
+                globalInitData = json;
+                return json;
+            }
+        } catch(e) {
+            console.error("Gagal mengambil init data:", e);
+        }
+        return null;
+    }
+
+    function applyBroadcast(data) {
+        if (data && data.active && data.message) {
+            document.getElementById('bc-disp-title').innerText = data.title || 'PENGUMUMAN PUSAT';
+            document.getElementById('bc-disp-message').innerText = data.message;
+            
+            let iconEl = document.getElementById('bc-icon-badge');
+            if (data.type === 'danger') iconEl.innerText = '🚨';
+            else if (data.type === 'warning') iconEl.innerText = '⚠️';
+            else iconEl.innerText = '📢';
+
+            document.getElementById('modal-broadcast').style.display = 'flex';
+        }
+    }
+
+    async function checkBroadcastPusat() {
+        if (!navigator.onLine) return;
+        if (globalInitData && globalInitData.broadcast) {
+            applyBroadcast(globalInitData.broadcast);
+            return;
+        }
+        try {
+            let res = await fetch(APPS_SCRIPT_URL + "?action=getBroadcast");
+            let data = await res.json();
+            applyBroadcast(data);
+        } catch (e) {
+            console.error("Gagal memuat pengumuman pusat:", e);
+        }
+    }
+
+    function closeBroadcastModal() {
+        document.getElementById('modal-broadcast').style.display = 'none';
+    }
+
+    async function checkSavedLogin() {
+        let savedDaerah = localStorage.getItem('taklimda_daerah');
+        if (savedDaerah) {
+            currentUser = savedDaerah;
+            document.getElementById('nav-avatar').innerText = currentUser;
+            document.getElementById('koreksi-daerah').innerText = currentUser;
+            
+            document.getElementById('view-login').classList.remove('active');
+            document.getElementById('view-koreksi').classList.add('active');
+            
+            await loadLocalCacheFirst();
+            fetchKoreksiDataRealtime();
+        }
+    }
+
+    function showToast(msg) {
+        const t = document.getElementById('toast');
+        if (!t) return;
+        t.innerText = msg;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    function getPendingQueue() {
+        try {
+            return JSON.parse(localStorage.getItem('taklimda_pending_queue') || '[]');
+        } catch(e) { return []; }
+    }
+
+    function savePendingQueue(queue) {
+        localStorage.setItem('taklimda_pending_queue', JSON.stringify(queue));
+        updatePendingUI();
+    }
+
+    function queueForSync(dataPayload) {
+        let queue = getPendingQueue();
+        queue = queue.filter(q => q._rowIndex !== dataPayload._rowIndex);
+        queue.push(dataPayload);
+        savePendingQueue(queue);
+    }
+
+    function updatePendingUI() {
+        let queue = getPendingQueue();
+        let bar = document.getElementById('pending-info-bar');
+        let num = document.getElementById('pending-count-num');
+        if (bar && num) {
+            if (queue.length > 0) {
+                num.innerText = queue.length;
+                bar.style.display = 'block';
+            } else {
+                bar.style.display = 'none';
+            }
+        }
+    }
+
+    async function saveLocalCache() {
+        if (currentUser && masterKoreksi.length > 0) {
+            await IDBHelper.set(`taklimda_cache_${currentUser}`, masterKoreksi);
+        }
+    }
+
+    async function loadLocalCacheFirst() {
+        if (!currentUser) return;
+        let cached = await IDBHelper.get(`taklimda_cache_${currentUser}`);
+        if (cached) {
+            try {
+                masterKoreksi = typeof cached === 'string' ? JSON.parse(cached) : cached;
+                updateDashboardStats();
+                renderKoreksiList();
+                updatePendingUI();
+            } catch(e) { console.error("Error reading cache", e); }
+        }
+    }
+
+    async function processPendingQueue() {
+        if (isSyncing || !navigator.onLine) return;
+        let queue = getPendingQueue();
+        if (queue.length === 0) return;
+
+        isSyncing = true;
+        showDynamicIsland('sync', '🔄 Memulai Sinkronisasi...');
+
+        let remaining = [...queue];
+        let successCount = 0;
+
+        for (let item of queue) {
+            try {
+                let res = await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: 'updateKoreksi',
+                        data: item
+                    })
+                });
+                
+                let jsonRes = await res.json();
+
+                if (res.ok && jsonRes.status === 'success') {
+                    remaining = remaining.filter(q => q._rowIndex !== item._rowIndex);
+                    
+                    let mItem = masterKoreksi.find(x => x._rowIndex === item._rowIndex);
+                    if (mItem) mItem._unsynced = false;
+                    
+                    if (jsonRes.archived) {
+                        showToast("ℹ️ Beberapa data disimpan ke Arsip Database karena pekan telah berganti.");
+                    }
+                    
+                    successCount++;
+                } else if (jsonRes.status === 'error') {
+                    remaining = remaining.filter(q => q._rowIndex !== item._rowIndex);
+                    showToast("⚠️ " + (jsonRes.message || "Gagal sinkronisasi data"));
+                }
+            } catch(e) {
+                console.error("Gagal sync item:", item, e);
+                break;
+            }
+        }
+
+        savePendingQueue(remaining);
+        await saveLocalCache();
+        isSyncing = false;
+
+        if (successCount > 0) {
+            showDynamicIsland('online', `✅ Sync ${successCount} Data Berhasil`);
+            showToast(`✅ ${successCount} Data offline berhasil tersinkronisasi ke pusat!`);
+            renderKoreksiList();
+        }
+    }
+
+    async function manualSync() {
+        if (!navigator.onLine) {
+            showDynamicIsland('offline', '⚠️ Sinyal Terputus');
+            showToast("⚠️ Tidak ada jaringan internet!");
+            return;
+        }
+        showDynamicIsland('sync', '🔄 Sinkronisasi Data...');
+        showToast("Memulai sinkronisasi...");
+        await processPendingQueue();
+        await loadAllInitData(true);
+        await fetchKoreksiDataRealtime();
+    }
+
+    async function fetchKoreksiDataRealtime() {
+        if (!navigator.onLine) {
+            showToast("Offline: Menampilkan data tersimpan di HP");
+            return;
+        }
+
+        let container = document.getElementById('santri-list-container');
+
+        try {
+            let initData = await loadAllInitData();
+
+            if (initData && initData.config && initData.config.filterAbsen) {
+                currentFilterMode = initData.config.filterAbsen.toLowerCase();
+            }
+
+            let bannerEl = document.getElementById('mode-banner-el');
+            if (bannerEl) {
+                if (currentFilterMode && currentFilterMode !== 'all') {
+                    bannerEl.className = `mode-banner ${currentFilterMode}`;
+                    bannerEl.innerText = `📢 Mode Koreksi Aktif: FOKUS DATA ${currentFilterMode.toUpperCase()}`;
+                    bannerEl.style.display = 'block';
+                } else {
+                    bannerEl.style.display = 'none';
+                }
+            }
+
+            if (initData && initData.broadcast) {
+                applyBroadcast(initData.broadcast);
+            }
+
+            let allRekap = (initData && initData.rekap) ? initData.rekap : [];
+            let rawData = allRekap.filter(r => r._source === 'koreksi' || !r._source);
+
+            if (!Array.isArray(rawData) || rawData.length === 0) {
+                masterKoreksi = [];
+                await saveLocalCache();
+                updateDashboardStats();
+                container.innerHTML = `<div style="text-align:center; padding:30px 15px; color:var(--text-muted); font-size:12px; background:white; border-radius:18px; border:1px solid var(--border);">Data pekan ini masih kosong / sudah diarsip.</div>`;
+                return;
+            }
+
+            let filtered = rawData.filter(r => {
+                let dom = String(window.getValPeka(r, ['domisili', 'daerah', 'kamar', 'wilayah']) || '').toUpperCase().trim();
+                let curr = String(currentUser || '').toUpperCase().trim();
+                if (!curr) return true;
+                
+                if (!dom.startsWith(curr)) return false;
+                let nextChar = dom.charAt(curr.length);
+                return !nextChar || !/^[A-Z]/.test(nextChar);
+            });
+
+            let pendingQueue = getPendingQueue();
+
+            let mappedList = filtered.map((r, i) => {
+                let actualRowIndex = (r._rowIndex !== undefined && r._rowIndex !== null && r._rowIndex !== '') ? r._rowIndex : (r.row_index || r.rowIndex || (i + 2));
+                let pendingItem = pendingQueue.find(p => p._rowIndex === actualRowIndex);
+
+                let tAlpha = pendingItem ? parseDates(pendingItem.tglAlpha) : parseDates(window.getValPeka(r, ['tgl_alpha', 'tglalpha', 'tanggal_alpha', 'alpha', 'tanggalalpa']));
+                let tIzin  = pendingItem ? parseDates(pendingItem.tglIzin)  : parseDates(window.getValPeka(r, ['tgl_izin', 'tglizin', 'tanggal_izin', 'izin', 'tanggalizin']));
+                let tSakit = pendingItem ? parseDates(pendingItem.tglSakit) : parseDates(window.getValPeka(r, ['tgl_sakit', 'tglsakit', 'tanggal_sakit', 'sakit', 'tanggalsakit']));
+                let statusK = pendingItem ? pendingItem.status : (window.getValPeka(r, ['status_koreksi', 'status', 'koreksi']) || 'Belum Dikoreksi');
+                let ket = pendingItem ? pendingItem.keterangan : (window.getValPeka(r, ['keterangan_taklimda', 'keterangan', 'ket']) || '-');
+
+                let isVerified = (statusK.toLowerCase().includes('sesuai') || statusK.toLowerCase().includes('benar') || statusK.toLowerCase().includes('sudah')) && !statusK.toLowerCase().includes('belum');
+
+                return {
+                    ...r,
+                    _rowIndex: actualRowIndex,
+                    _idPps: window.getValPeka(r, ['id_pps', 'idpps', 'id', 'nis']),
+                    _nama: window.getValPeka(r, ['nama_santri', 'nama', 'namasantri', 'name']),
+                    _domisili: String(window.getValPeka(r, ['domisili', 'daerah', 'kamar'])).toUpperCase(),
+                    _jalsah: window.getValPeka(r, ['jalsah', 'kelompok', 'kelas']) || '-',
+                    _foto: window.getValPeka(r, ['foto', 'fotourl', 'urlfoto', 'linkfoto']),
+                    _tglAlphaArr: tAlpha,
+                    _tglIzinArr: tIzin,
+                    _tglSakitArr: tSakit,
+                    _keterangan: ket,
+                    _statusKoreksi: statusK,
+                    _isDone: isVerified,
+                    _unsynced: !!pendingItem
+                };
+            });
+
+            if (currentFilterMode === 'alpha') {
+                masterKoreksi = mappedList.filter(x => x._tglAlphaArr.length > 0 || x._isDone);
+            } else if (currentFilterMode === 'izin') {
+                masterKoreksi = mappedList.filter(x => x._tglIzinArr.length > 0 || x._isDone);
+            } else if (currentFilterMode === 'sakit') {
+                masterKoreksi = mappedList.filter(x => x._tglSakitArr.length > 0 || x._isDone);
+            } else {
+                masterKoreksi = mappedList;
+            }
+
+            await saveLocalCache();
+            updateDashboardStats();
+            renderKoreksiList();
+            updatePendingUI();
+            showToast(`Terhubung: ${masterKoreksi.length} Santri Pekan Ini (${currentFilterMode.toUpperCase()})`);
+        } catch(e) {
+            console.error(e);
+            showToast("Menggunakan data lokal HP (Koneksi terganggu)");
+        }
+    }
+
+    function updateDashboardStats() {
+        let total = masterKoreksi.length;
+        let selesai = masterKoreksi.filter(x => x._isDone).length;
+        let belum = total - selesai;
+        let percent = total > 0 ? Math.round((selesai / total) * 100) : 0;
+
+        document.getElementById('stat-progress-text').innerText = `${selesai} / ${total} Santri Selesai`;
+        document.getElementById('stat-percent').innerText = `${percent}%`;
+        document.getElementById('progress-bar-fill').style.width = `${percent}%`;
+
+        let countBelumEl = document.getElementById('count-belum');
+        if (countBelumEl) countBelumEl.innerText = belum;
+
+        let countSudahEl = document.getElementById('count-sudah');
+        if (countSudahEl) countSudahEl.innerText = selesai;
+    }
+
+    function setFilter(filterType) {
+        activeFilter = filterType;
+        selectedRoom = null; 
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`tab-${filterType}`).classList.add('active');
+        renderKoreksiList();
+    }
+
+    function bukaKamar(roomName) {
+        selectedRoom = roomName;
+        renderKoreksiList();
+    }
+
+    function tutupKamar() {
+        selectedRoom = null;
+        renderKoreksiList();
+    }
+
+    function renderKoreksiList() {
+        let container = document.getElementById('santri-list-container');
+        let searchVal = document.getElementById('search-koreksi').value.toUpperCase().trim();
+        container.innerHTML = "";
+
+        let listToShow = masterKoreksi.filter(item => {
+            let matchFilter = activeFilter === 'belum' ? !item._isDone : item._isDone;
+            let matchSearch = true;
+            if (searchVal) {
+                let haystack = `${item._nama} ${item._idPps} ${item._domisili} ${item.tingkat || ''} ${item.kategori || ''}`.toUpperCase();
+                matchSearch = haystack.includes(searchVal);
+            }
+            return matchFilter && matchSearch;
+        });
+
+        if (selectedRoom !== null) {
+            let santriDiKamar = listToShow.filter(item => {
+                let room = (item._domisili && item._domisili.trim()) ? item._domisili.trim() : 'LAIN-LAIN';
+                return room === selectedRoom;
+            });
+
+            let headerDiv = document.createElement('div');
+            headerDiv.className = 'room-detail-header fade-in';
+            headerDiv.innerHTML = `
+                <button class="btn-back" onclick="tutupKamar()">← Kembali ke Daftar Kamar</button>
+                <div style="text-align:right;">
+                    <div style="font-size:13px; font-weight:800; color:var(--text-main);">Kamar ${selectedRoom}</div>
+                    <div style="font-size:10px; color:var(--text-muted); font-weight:700;">${santriDiKamar.length} Santri</div>
+                </div>
+            `;
+            container.appendChild(headerDiv);
+
+            if (santriDiKamar.length === 0) {
+                let emptyDiv = document.createElement('div');
+                emptyDiv.className = 'fade-in';
+                emptyDiv.style.cssText = 'text-align:center; padding:30px 15px; color:var(--text-muted); font-size:12px; background:white; border-radius:18px; border:1px solid var(--border);';
+                emptyDiv.innerHTML = `
+                    <div style="font-size:32px; margin-bottom:8px;">🎉</div>
+                    <div style="font-weight:800; font-size:13px; color:var(--text-main); margin-bottom:4px;">Kamar Ini Sudah Selesai!</div>
+                    <div style="margin-bottom:12px;">Semua santri di Kamar ${selectedRoom} sudah dikoreksi.</div>
+                    <button class="btn-act" style="background:var(--primary-gradient); color:white; padding:10px 16px; margin:0 auto;" onclick="tutupKamar()">Pilih Kamar Lain ➔</button>
+                `;
+                container.appendChild(emptyDiv);
+                return;
+            }
+
+            let listDiv = document.createElement('div');
+            listDiv.className = 'santri-list fade-in';
+
+            santriDiKamar.forEach(item => {
+                let st = item._statusKoreksi.toLowerCase();
+                let badgeHtml = `<span class="badge-status badge-belum">Belum</span>`;
+                
+                if (st.includes('sesuai') || st.includes('benar')) {
+                    badgeHtml = `<span class="badge-status badge-benar">✔ Sesuai</span>`;
+                } else if ((st.includes('sudah') || st.includes('dikoreksi')) && !st.includes('belum')) {
+                    badgeHtml = `<span class="badge-status badge-koreksi">✏ Dikoreksi</span>`;
+                }
+
+                let unsyncedBadge = item._unsynced ? `<span class="badge-unsynced">⏳ Belum Sync</span>` : '';
+
+                let card = document.createElement('div');
+                card.className = 'santri-card';
+
+                card.innerHTML = `
+                    <div class="card-top">
+                        <div>
+                            <div class="santri-nama">${item._nama}</div>
+                            <div class="santri-meta">ID: <b>${item._idPps}</b> • ${item._domisili}</div>
+                        </div>
+                        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+                            ${badgeHtml}
+                            ${unsyncedBadge}
+                        </div>
+                    </div>
+
+                    <div class="pills-group">
+                        <span class="pill-tag pill-sakit">Sakit: ${item._tglSakitArr.length}</span>
+                        <span class="pill-tag pill-izin">Izin: ${item._tglIzinArr.length}</span>
+                        <span class="pill-tag pill-alpha">Alpha: ${item._tglAlphaArr.length}</span>
+                    </div>
+
+                    <div class="card-actions">
+                        <button class="btn-act btn-verify" onclick="markAsSesuaiByRowIndex(${item._rowIndex})">✔ Sesuai / Benar</button>
+                        <button class="btn-act btn-edit-card" onclick="bukaModalKoreksiByRowIndex(${item._rowIndex})">✏ Edit / Geser Tgl</button>
+                    </div>
+                `;
+                listDiv.appendChild(card);
+            });
+
+            container.appendChild(listDiv);
+            return;
+        }
+
+        let grouped = {};
+        listToShow.forEach(item => {
+            let room = (item._domisili && item._domisili.trim()) ? item._domisili.trim() : 'LAIN-LAIN';
+            if (!grouped[room]) grouped[room] = [];
+            grouped[room].push(item);
+        });
+
+        let sortedRooms = Object.keys(grouped).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+        if (sortedRooms.length === 0) {
+            let msg = activeFilter === 'belum' ? 'Semua kamar sudah selesai dikoreksi!' : 'Belum ada kamar yang selesai dikoreksi.';
+            if (searchVal) msg = 'Kamar / Santri yang dicari tidak ditemukan.';
+            container.innerHTML = `<div style="text-align:center; padding:30px 15px; color:var(--text-muted); font-size:12px; background:white; border-radius:18px; border:1px solid var(--border);">${msg}</div>`;
+            return;
+        }
+
+        let gridDiv = document.createElement('div');
+        gridDiv.className = 'room-grid fade-in';
+
+        sortedRooms.forEach(roomName => {
+            let count = grouped[roomName].length;
+
+            let roomCard = document.createElement('div');
+            roomCard.className = 'room-card';
+            roomCard.onclick = () => bukaKamar(roomName);
+
+            roomCard.innerHTML = `
+                <div class="room-card-header">
+                    <div class="room-card-title">
+                        <span style="font-size:16px;">🚪</span>
+                        <span>Kamar ${roomName}</span>
+                    </div>
+                    <span class="room-card-count">${count} Santri</span>
+                </div>
+                <div class="room-card-footer">
+                    <span>${activeFilter === 'belum' ? 'Perlu Koreksi' : 'Selesai'}</span>
+                    <span style="color:var(--primary); font-weight:800;">Buka ➔</span>
+                </div>
+            `;
+            gridDiv.appendChild(roomCard);
+        });
+
+        container.appendChild(gridDiv);
+    }
+
+    async function markAsSesuaiByRowIndex(rowIndex) {
+        const item = masterKoreksi.find(x => x._rowIndex === rowIndex);
+        if (!item) return;
+
+        let hasAlpha = item._tglAlphaArr && item._tglAlphaArr.length > 0;
+        let currentKet = (item._keterangan || '').trim();
+
+        if (hasAlpha && (!currentKet || currentKet === '-')) {
+            showToast("⚠️ Ada Alpha! Wajib isi Keterangan (klik Edit Tanggal).");
+            bukaModalKoreksiByRowIndex(rowIndex);
+            setTimeout(() => {
+                let inputKet = document.getElementById('edit-ket');
+                if (inputKet) {
+                    inputKet.style.borderColor = '#e11d48';
+                    inputKet.focus();
+                }
+            }, 300);
+            return;
+        }
+
+        item._statusKoreksi = 'Sesuai (Benar)';
+        item._isDone = true;
+        item._unsynced = true;
+
+        await saveLocalCache();
+        updateDashboardStats();
+        renderKoreksiList();
+
+        let dataPayload = {
+            _rowIndex: item._rowIndex,
+            _idPps: item._idPps,
+            tglSakit: item._tglSakitArr.join(', '),
+            tglIzin: item._tglIzinArr.join(', '),
+            tglAlpha: item._tglAlphaArr.join(', '),
+            keterangan: item._keterangan !== '-' ? item._keterangan : '',
+            status: 'Sesuai (Benar)'
+        };
+
+        sendOrQueueData(dataPayload);
+    }
+
+    async function sendOrQueueData(dataPayload) {
+        if (!navigator.onLine) {
+            queueForSync(dataPayload);
+            showDynamicIsland('offline', '💾 Data Tersimpan di HP');
+            showToast("💾 Tersimpan di HP. Akan dikirim otomatis saat online.");
+            return;
+        }
+
+        showDynamicIsland('sync', '📤 Mengirim ke Pusat...');
+        try {
+            let res = await fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'updateKoreksi',
+                    data: dataPayload
+                })
+            });
+            
+            let jsonRes = await res.json();
+            
+            if (res.ok && jsonRes.status === 'success') {
+                showDynamicIsland('online', '✔ Data Sukses Terkirim');
+                let mItem = masterKoreksi.find(x => x._rowIndex === dataPayload._rowIndex);
+                if (mItem) mItem._unsynced = false;
+                
+                if (jsonRes.archived) {
+                    showToast("ℹ️ Tersimpan ke Arsip Database (Pekan telah berganti).");
+                }
+                
+                await saveLocalCache();
+                renderKoreksiList();
+            } else if (jsonRes.status === 'error') {
+                showToast("⚠️ " + (jsonRes.message || "Server menolak pembaruan data."));
+                let queue = getPendingQueue();
+                queue = queue.filter(q => q._rowIndex !== dataPayload._rowIndex);
+                savePendingQueue(queue);
+            } else {
+                throw new Error("Respon server gagal");
+            }
+        } catch(err) {
+            console.warn("Gagal terkirim langsung, masuk antrean offline:", err);
+            queueForSync(dataPayload);
+            showDynamicIsland('offline', '💾 Disimpan di HP (Sinyal Hilang)');
+        }
+    }
+
+    function generateAlphabetGrid() {
+        const grid = document.getElementById('alphabet-grid');
+        grid.innerHTML = "";
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter => {
+            let btn = document.createElement('button');
+            btn.className = 'alpha-btn';
+            btn.innerText = letter;
+            btn.onclick = () => {
+                document.querySelectorAll('.alpha-btn').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                currentUser = letter;
+                document.getElementById('login-logo').innerText = letter;
+            };
+            grid.appendChild(btn);
+        });
+    }
+
+    async function login() {
+        const passInput = document.getElementById('password').value.trim();
+        const errDiv = document.getElementById('login-error');
+        const passEl = document.getElementById('password');
+
+        errDiv.style.display = 'none';
+        passEl.style.borderColor = 'var(--border)';
+
+        if (!currentUser) {
+            errDiv.innerText = "⚠️ Pilih Abjad Daerah terlebih dahulu!";
+            errDiv.style.display = 'block';
+            showToast("Pilih Abjad Daerah dulu!");
+            return;
+        }
+        if (!passInput) {
+            errDiv.innerText = "⚠️ Masukkan password!";
+            errDiv.style.display = 'block';
+            passEl.style.borderColor = '#e11d48';
+            showToast("Masukkan password!");
+            return;
+        }
+
+        showToast("Memeriksa kata sandi...");
+
+        try {
+            let initData = await loadAllInitData();
+            let users = initData ? initData.users : null;
+
+            if (!users || !Array.isArray(users)) {
+                let res = await fetch(APPS_SCRIPT_URL + "?action=getUsers");
+                users = await res.json();
+            }
+
+            if (!Array.isArray(users)) {
+                throw new Error("Respon data pengguna dari server tidak valid!");
+            }
+
+            let foundUser = users.find(u => String(u.daerah || u.Daerah || '').trim().toUpperCase() === currentUser);
+            
+            if (!foundUser || passInput !== foundUser.password) {
+                errDiv.innerText = "❌ Kata Sandi Salah!";
+                errDiv.style.display = 'block';
+                passEl.style.borderColor = '#e11d48';
+                showToast("❌ Password Salah!");
+                return;
+            }
+
+            localStorage.setItem('taklimda_daerah', currentUser);
+            document.getElementById('nav-avatar').innerText = currentUser;
+            document.getElementById('koreksi-daerah').innerText = currentUser;
+            
+            document.getElementById('view-login').classList.remove('active');
+            document.getElementById('view-koreksi').classList.add('active');
+            
+            await loadLocalCacheFirst();
+            fetchKoreksiDataRealtime();
+
+        } catch(err) {
+            console.error(err);
+            errDiv.innerText = "❌ Gagal terhubung ke jaringan/server!";
+            errDiv.style.display = 'block';
+            passEl.style.borderColor = '#e11d48';
+            showToast("Gagal verifikasi! Periksa Koneksi Internet.");
+        }
+    }
+
+    function logout() {
+        localStorage.removeItem('taklimda_daerah');
+        currentUser = "";
+        selectedRoom = null;
+        document.getElementById('view-koreksi').classList.remove('active');
+        document.getElementById('view-login').classList.add('active');
+    }
+
+    function bukaModalGantiPass() {
+        document.getElementById('pass-daerah-label').innerText = currentUser;
+        document.getElementById('pass-lama').value = '';
+        document.getElementById('pass-baru').value = '';
+        document.getElementById('pass-konfirm').value = '';
+        document.getElementById('ganti-pass-error').style.display = 'none';
+        document.getElementById('modal-ganti-pass').style.display = 'flex';
+    }
+
+    function closeGantiPassModal() {
+        document.getElementById('modal-ganti-pass').style.display = 'none';
+    }
+
+    async function submitGantiPassword() {
+        const passLama = document.getElementById('pass-lama').value.trim();
+        const passBaru = document.getElementById('pass-baru').value.trim();
+        const passKonfirm = document.getElementById('pass-konfirm').value.trim();
+        const errDiv = document.getElementById('ganti-pass-error');
+
+        errDiv.style.display = 'none';
+
+        if (!passLama || !passBaru || !passKonfirm) {
+            errDiv.innerText = "⚠️ Semua kolom wajib diisi!";
+            errDiv.style.display = 'block';
+            return;
+        }
+
+        if (passBaru !== passKonfirm) {
+            errDiv.innerText = "⚠️ Konfirmasi password baru tidak cocok!";
+            errDiv.style.display = 'block';
+            return;
+        }
+
+        if (!navigator.onLine) {
+            errDiv.innerText = "⚠️ Harus terhubung internet untuk ganti password!";
+            errDiv.style.display = 'block';
+            return;
+        }
+
+        showToast("Memproses ganti password...");
+
+        try {
+            let res = await fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'updatePassword',
+                    daerah: currentUser,
+                    oldPassword: passLama,
+                    newPassword: passBaru
+                })
+            });
+
+            let jsonRes = await res.json();
+            if (jsonRes.status === 'success') {
+                showToast("✅ Password berhasil diperbarui!");
+                closeGantiPassModal();
+            } else {
+                errDiv.innerText = "❌ " + (jsonRes.message || "Gagal memperbarui password. Periksa password lama!");
+                errDiv.style.display = 'block';
+            }
+        } catch(e) {
+            console.error(e);
+            errDiv.innerText = "❌ Terjadi kesalahan jaringan!";
+            errDiv.style.display = 'block';
+        }
+    }
+
+    function bukaModalKoreksiByRowIndex(rowIndex) {
+        activeEditRowIndex = rowIndex;
+        isPracticeMode = false;
+        document.getElementById('practice-guide-banner').style.display = 'none';
+        document.getElementById('edit-modal-title').innerText = "EDIT KOREKSI SANTRI";
+
+        const item = masterKoreksi.find(x => x._rowIndex === rowIndex);
+        if (!item) return;
+
+        tempSakit = [...(item._tglSakitArr || [])];
+        tempIzin = [...(item._tglIzinArr || [])];
+        tempAlpha = [...(item._tglAlphaArr || [])];
+        historyStack = [];
+
+        document.getElementById('edit-nama').innerText = item._nama || '-';
+        document.getElementById('edit-pps').innerText = item._idPps || '-';
+        document.getElementById('edit-domisili').innerText = item._domisili || '-';
+        document.getElementById('edit-ket').value = item._keterangan !== '-' ? item._keterangan : '';
+
+        let fotoImg = document.getElementById('edit-foto');
+        let fotoPlaceholder = document.getElementById('edit-foto-placeholder');
+
+        if (item._foto && item._foto.trim() !== '') {
+            fotoImg.src = item._foto;
+            fotoImg.style.display = 'block';
+            fotoPlaceholder.style.display = 'none';
+        } else {
+            fotoImg.style.display = 'none';
+            fotoPlaceholder.style.display = 'flex';
+        }
+
+        renderChips();
+        updateUndoUI();
+        document.getElementById('modal-edit-koreksi').style.display = 'flex';
+    }
+
+    function bukaPreviewFoto() {
+        const fotoImg = document.getElementById('edit-foto');
+        const previewImg = document.getElementById('preview-foto-img');
+        const previewPlaceholder = document.getElementById('preview-foto-placeholder');
+        
+        const nama = document.getElementById('edit-nama').innerText;
+        const pps = document.getElementById('edit-pps').innerText;
+        const kamar = document.getElementById('edit-domisili').innerText;
+
+        document.getElementById('preview-foto-nama').innerText = nama;
+        document.getElementById('preview-foto-meta').innerText = `ID: ${pps} • Kamar: ${kamar}`;
+
+        if (fotoImg.style.display !== 'none' && fotoImg.src) {
+            previewImg.src = fotoImg.src;
+            previewImg.style.display = 'block';
+            previewPlaceholder.style.display = 'none';
+        } else {
+            previewImg.style.display = 'none';
+            previewPlaceholder.style.display = 'block';
+        }
+
+        const modal = document.getElementById('modal-photo-preview');
+        modal.style.display = 'flex';
+    }
+
+    function closePhotoPreview() {
+        document.getElementById('modal-photo-preview').style.display = 'none';
+    }
+
+    function saveHistorySnapshot() {
+        historyStack.push({
+            alpha: [...tempAlpha],
+            izin: [...tempIzin],
+            sakit: [...tempSakit]
+        });
+        updateUndoUI();
+    }
+
+    function undoLastAction() {
+        if (historyStack.length === 0) return;
+        let lastState = historyStack.pop();
+        tempAlpha = lastState.alpha;
+        tempIzin = lastState.izin;
+        tempSakit = lastState.sakit;
+        renderChips();
+        updateUndoUI();
+        showToast("↩️ Perubahan dibatalkan!");
+    }
+
+    function updateUndoUI() {
+        let btn = document.getElementById('btn-undo');
+        if (!btn) return;
+        if (historyStack.length > 0) {
+            btn.disabled = false;
+            btn.style.opacity = "1";
+        } else {
+            btn.disabled = true;
+            btn.style.opacity = "0.5";
+        }
+    }
+
+    function renderChips() {
+        const setChips = (containerId, arr, type, chipClass) => {
+            let el = document.getElementById(containerId);
+            if (!el) return;
+            if (arr.length === 0) {
+                el.innerHTML = `<span style="font-size:10px; color:var(--text-muted); padding:4px;">Kosong (geser tanggal ke sini)</span>`;
+            } else {
+                el.innerHTML = arr.map(tgl => `
+                    <span class="chip ${chipClass}" data-tgl="${tgl}" data-type="${type}">
+                        🖐️ Tgl ${tgl}
+                    </span>
+                `).join('');
+            }
+        };
+
+        setChips('chips-alpha', tempAlpha, 'alpha', 'chip-alpha');
+        setChips('chips-izin', tempIzin, 'izin', 'chip-izin');
+        setChips('chips-sakit', tempSakit, 'sakit', 'chip-sakit');
+
+        let reqBadge = document.getElementById('ket-required-badge');
+        if (reqBadge) {
+            reqBadge.style.display = tempAlpha.length > 0 ? 'inline' : 'none';
+        }
+    }
+
+    function moveChip(tgl, fromType, toType) {
+        if (fromType === toType) return;
+        saveHistorySnapshot();
+
+        if (fromType === 'alpha') tempAlpha = tempAlpha.filter(x => x !== tgl);
+        if (fromType === 'izin') tempIzin = tempIzin.filter(x => x !== tgl);
+        if (fromType === 'sakit') tempSakit = tempSakit.filter(x => x !== tgl);
+
+        if (toType === 'alpha' && !tempAlpha.includes(tgl)) tempAlpha.push(tgl);
+        if (toType === 'izin' && !tempIzin.includes(tgl)) tempIzin.push(tgl);
+        if (toType === 'sakit' && !tempSakit.includes(tgl)) tempSakit.push(tgl);
+
+        renderChips();
+
+        if (toType === 'trash') {
+            showToast(`🗑️ Tgl ${tgl} dihapus. (Klik Undo jika batal)`);
+        } else {
+            showToast(`↔️ Tgl ${tgl} dipindah ke ${toType.toUpperCase()}`);
+        }
+
+        if (isPracticeMode) {
+            showToast("🎉 Hebat! Kamu sudah bisa menggeser tanggal!");
+            setTimeout(() => {
+                closeEditModal();
+                showToast("✅ Tutorial selesai! Selamat bertugas.");
+                isPracticeMode = false;
+            }, 1000);
+        }
+    }
+
+    function bukaModalTutorial() {
+        tutCurrentStep = 1;
+        renderTutorialStep();
+        document.getElementById('modal-tutorial').style.display = 'flex';
+    }
+
+    function closeTutorialModal() {
+        document.getElementById('modal-tutorial').style.display = 'none';
+    }
+
+    function changeTutStep(delta) {
+        tutCurrentStep += delta;
+        if (tutCurrentStep < 1) tutCurrentStep = 1;
+        if (tutCurrentStep > 2) tutCurrentStep = 2;
+        renderTutorialStep();
+    }
+
+    function handleTutNextClick() {
+        if (tutCurrentStep < 2) {
+            changeTutStep(1);
+        } else {
+            closeTutorialModal();
+            mulaiPraktekLangsung();
+        }
+    }
+
+    function mulaiPraktekLangsung() {
+        isPracticeMode = true;
+        activeEditRowIndex = -999;
+
+        tempAlpha = [12];
+        tempIzin = [15];
+        tempSakit = [];
+        historyStack = [];
+
+        document.getElementById('edit-nama').innerText = "SANTRI SIMULASI (PRAKTEK)";
+        document.getElementById('edit-pps').innerText = "123456";
+        document.getElementById('edit-domisili').innerText = "KAMAR SIMULASI";
+        document.getElementById('edit-ket').value = "Coba geser tanggal di bawah";
+
+        document.getElementById('edit-foto').style.display = 'none';
+        document.getElementById('edit-foto-placeholder').style.display = 'flex';
+
+        document.getElementById('practice-guide-banner').style.display = 'block';
+        document.getElementById('edit-modal-title').innerText = "🎯 PRAKTEK KOREKSI LANGSUNG";
+
+        renderChips();
+        updateUndoUI();
+        document.getElementById('modal-edit-koreksi').style.display = 'flex';
+    }
+
+    function renderTutorialStep() {
+        const canvas = document.getElementById('tutorial-canvas');
+        const indicator = document.getElementById('tut-step-indicator');
+        const btnPrev = document.getElementById('btn-tut-prev');
+        const btnNext = document.getElementById('btn-tut-next');
+
+        indicator.innerText = `Langkah ${tutCurrentStep} / 2`;
+        btnPrev.style.opacity = tutCurrentStep === 1 ? "0.4" : "1";
+
+        if (tutCurrentStep === 1) {
+            btnNext.innerHTML = "Lanjut ➔";
+            canvas.innerHTML = `
+                <div class="tut-sim-screen-wide" style="height:210px;">
+                    <div style="font-size:10px; font-weight:800; color:var(--text-muted); text-transform:uppercase;">1. GESER (DRAG) TANGGAL KE KATEGORI LAIN</div>
+                    
+                    <div class="section-box" style="padding:8px; background:white;">
+                        <div style="font-size:9px; font-weight:800; color:var(--alpha-color);">TANGGAL ALPHA</div>
+                        <div style="height:24px;"></div>
+                    </div>
+
+                    <div class="section-box" style="padding:8px; background:white; margin-top:6px;">
+                        <div style="font-size:9px; font-weight:800; color:var(--sakit-color);">TANGGAL SAKIT</div>
+                        <div style="height:24px;"></div>
+                    </div>
+
+                    <div class="moving-chip-demo anim-chip-color">🖐️ Tgl 12</div>
+                    <div class="hand-pointer-demo anim-hand-color">👇</div>
+                </div>
+            `;
+        } else if (tutCurrentStep === 2) {
+            btnNext.innerHTML = "🚀 Mulai Praktek Langsung";
+            canvas.innerHTML = `
+                <div class="tut-sim-screen-wide" style="height:210px; justify-content:center; align-items:center; text-align:center;">
+                    <div style="font-size:38px; margin-bottom:6px;">🎯</div>
+                    <div style="font-size:14px; font-weight:800; color:var(--text-main); margin-bottom:4px;">Siap Coba Praktek?</div>
+                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4; max-width:85%;">
+                        Klik tombol di bawah untuk mencoba **menggeser 1 tanggal**. Jika berhasil, tutorial otomatis selesai!
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    /* SISTEM DRAG & DROP TEROPTIMASI ULTRA-LANCAR */
+    function setupTouchDragAndDrop() {
+        let draggedData = null;
+        let ghostEl = null;
+        const trashZone = document.getElementById('trash-zone');
+        let ticking = false;
+        let currentX = 0, currentY = 0;
+        let cachedZones = [];
+
+        document.addEventListener('pointerdown', function(e) {
+            let chip = e.target.closest('.chip');
+            if (!chip) return;
+
+            let tgl = parseInt(chip.getAttribute('data-tgl'), 10);
+            let type = chip.getAttribute('data-type');
+            if (!tgl || !type) return;
+
+            draggedData = { tgl, type, element: chip };
+            
+            if (trashZone) trashZone.classList.add('show-floating');
+
+            cachedZones = Array.from(document.querySelectorAll('[data-zone]')).map(el => {
+                let rect = el.getBoundingClientRect();
+                return {
+                    element: el,
+                    zone: el.getAttribute('data-zone'),
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom
+                };
+            });
+
+            document.body.classList.add('is-dragging');
+
+            ghostEl = chip.cloneNode(true);
+            ghostEl.style.position = 'fixed';
+            ghostEl.style.top = '0px';
+            ghostEl.style.left = '0px';
+            ghostEl.style.zIndex = '9999999';
+            ghostEl.style.pointerEvents = 'none';
+            ghostEl.style.opacity = '0.9';
+            ghostEl.style.boxShadow = '0 10px 25px rgba(0,0,0,0.25)';
+            
+            currentX = e.clientX - 35;
+            currentY = e.clientY - 20;
+            ghostEl.style.transform = `translate3d(${currentX}px, ${currentY}px, 0) scale(1.1) rotate(2deg)`;
+            
+            document.body.appendChild(ghostEl);
+            chip.style.opacity = '0.2';
+
+            function updatePosition() {
+                if (ghostEl) {
+                    ghostEl.style.transform = `translate3d(${currentX}px, ${currentY}px, 0) scale(1.1) rotate(2deg)`;
+                    
+                    let checkX = currentX + 35;
+                    let checkY = currentY + 20;
+                    
+                    cachedZones.forEach(z => {
+                        let isHover = checkX >= z.left && checkX <= z.right && checkY >= z.top && checkY <= z.bottom;
+                        if (isHover) {
+                            z.element.classList.add('drag-over');
+                        } else {
+                            z.element.classList.remove('drag-over');
+                        }
+                    });
+                }
+                ticking = false;
+            }
+
+            function onPointerMove(pe) {
+                if (!ghostEl) return;
+                currentX = pe.clientX - 35;
+                currentY = pe.clientY - 20;
+
+                if (!ticking) {
+                    requestAnimationFrame(updatePosition);
+                    ticking = true;
+                }
+            }
+
+            function onPointerUp(pe) {
+                document.removeEventListener('pointermove', onPointerMove);
+                document.removeEventListener('pointerup', onPointerUp);
+
+                document.body.classList.remove('is-dragging');
+
+                let dropZoneType = null;
+                let checkX = pe.clientX;
+                let checkY = pe.clientY;
+
+                cachedZones.forEach(z => {
+                    z.element.classList.remove('drag-over');
+                    if (checkX >= z.left && checkX <= z.right && checkY >= z.top && checkY <= z.bottom) {
+                        dropZoneType = z.zone;
+                    }
+                });
+
+                if (trashZone) trashZone.classList.remove('show-floating');
+
+                if (ghostEl) {
+                    ghostEl.remove();
+                    ghostEl = null;
+                }
+                if (draggedData && draggedData.element) {
+                    draggedData.element.style.opacity = '1';
+                }
+
+                if (dropZoneType && draggedData) {
+                    moveChip(draggedData.tgl, draggedData.type, dropZoneType);
+                }
+                draggedData = null;
+            }
+
+            document.addEventListener('pointermove', onPointerMove, { passive: true });
+            document.addEventListener('pointerup', onPointerUp);
+        });
+    }
+
+    function tambahTanggalGlobal(type) {
+        const el = document.getElementById('input-global-tgl');
+        if (!el) return;
+        
+        const rawVal = el.value.trim();
+        if (!rawVal) return;
+
+        const parsedDates = parseDates(rawVal);
+        if (parsedDates.length === 0) {
+            showToast("⚠️ Tanggal tidak valid (harus 1-31)");
+            el.value = '';
+            return;
+        }
+
+        saveHistorySnapshot();
+
+        parsedDates.forEach(val => {
+            tempAlpha = tempAlpha.filter(x => x !== val);
+            tempIzin = tempIzin.filter(x => x !== val);
+            tempSakit = tempSakit.filter(x => x !== val);
+
+            if (type === 'alpha') tempAlpha.push(val);
+            if (type === 'izin') tempIzin.push(val);
+            if (type === 'sakit') tempSakit.push(val);
+        });
+
+        el.value = '';
+        renderChips();
+    }
+
+    function addTodayDate(type) {
+        let today = new Date().getDate();
+        saveHistorySnapshot();
+
+        tempAlpha = tempAlpha.filter(x => x !== today);
+        tempIzin = tempIzin.filter(x => x !== today);
+        tempSakit = tempSakit.filter(x => x !== today);
+
+        if (type === 'alpha') tempAlpha.push(today);
+        if (type === 'izin') tempIzin.push(today);
+        if (type === 'sakit') tempSakit.push(today);
+
+        renderChips();
+    }
+
+    function closeEditModal() {
+        document.getElementById('modal-edit-koreksi').style.display = 'none';
+        isPracticeMode = false;
+    }
+
+    async function saveEditModal() {
+        if (isPracticeMode) {
+            showToast("🎉 Latihan selesai! Kamu sudah siap menggunakan aplikasi.");
+            closeEditModal();
+            return;
+        }
+
+        if (activeEditRowIndex === null) return;
+        const item = masterKoreksi.find(x => x._rowIndex === activeEditRowIndex);
+        if (!item) return;
+
+        let ketVal = document.getElementById('edit-ket').value.trim();
+
+        if (tempAlpha.length > 0 && (!ketVal || ketVal === '-' || ketVal === '')) {
+            showToast("⚠️ Wajib mengisi KETERANGAN karena santri memiliki Tanggal Alpha!");
+            let inputKet = document.getElementById('edit-ket');
+            if (inputKet) {
+                inputKet.style.borderColor = '#e11d48';
+                inputKet.focus();
+            }
+            return;
+        }
+
+        item._tglSakitArr = tempSakit.sort((a,b)=>a-b);
+        item._tglIzinArr = tempIzin.sort((a,b)=>a-b);
+        item._tglAlphaArr = tempAlpha.sort((a,b)=>a-b);
+        item._keterangan = ketVal || '-';
+        item._statusKoreksi = 'Sudah Dikoreksi';
+        item._isDone = true;
+        item._unsynced = true;
+
+        await saveLocalCache();
+        closeEditModal();
+        updateDashboardStats();
+        renderKoreksiList();
+
+        let dataPayload = {
+            _rowIndex: item._rowIndex,
+            _idPps: item._idPps,
+            tglSakit: item._tglSakitArr.join(', '),
+            tglIzin: item._tglIzinArr.join(', '),
+            tglAlpha: item._tglAlphaArr.join(', '),
+            keterangan: item._keterangan,
+            status: 'Sudah Dikoreksi'
+        };
+
+        sendOrQueueData(dataPayload);
+    }
+    </script>
+</body>
+</html>
